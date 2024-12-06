@@ -4,10 +4,16 @@ import warnings
 from datetime import datetime
 import pandas as pd
 import numpy as np
+from rich.progress import Progress
+import time
 
 # Suppress all SettingWithCopyWarnings and FutureWarnings
 warnings.filterwarnings('ignore', category=pd.errors.SettingWithCopyWarning)
 warnings.filterwarnings('ignore', category=FutureWarning)
+
+
+# secondary functions --------------------------------------------------------------------------------------------------
+
 
 def parse_date(date_str):
     for fmt in ('%d-%m-%Y', '%d-%m-%y', '%d/%m/%Y', '%d/%m/%y'):
@@ -38,6 +44,25 @@ def filter_dataframes_by_idcontacto(dataframes, idcontacto):
             filtered_dataframes.append(df)
     return filtered_dataframes
 
+def filter_dataframes_by_warehouse(dataframes, warehouse):
+    filtered_dataframes = []
+    for df in dataframes:
+
+        # Identify all columns that could represent 'bodega'
+        bodega_columns = [col for col in df.columns if 'bodega' in col]
+        if bodega_columns:
+
+            # Create a mask for rows where any 'bodega' column matches the target warehouse
+            mask = pd.Series(False, index=df.index)
+            for col in bodega_columns:
+                mask |= (df[col].astype(str).str.strip() == warehouse)
+            df_filtered = df[mask].copy()
+            filtered_dataframes.append(df_filtered)
+        else:
+
+            # If 'bodega' not in columns, keep the DataFrame as is
+            filtered_dataframes.append(df)
+    return filtered_dataframes
 
 # Function to resolve Bodega conflicts
 def resolve_bodega(row):
@@ -106,332 +131,337 @@ def get_base_output_path():
     return obase_path
 
 
-# Function to load data
+# Main functions -------------------------------------------------------------------------------------------------------
+
 def load_data():
-    base_path = get_base_path()  # Get the correct base path based on the OS
+    with Progress() as progress:
+        base_path = get_base_path()  # Get the correct base path based on the OS
 
-    # Función para tratar con las líneas problemáticas de los csv, para evitar errores de tokenización
-    def read_csv_in_chunks(file_path, chunk_size=10000, encoding='latin1', dtype='str'):
-        chunks = []
-        try:
-            for chunk in pd.read_csv(file_path, encoding=encoding, dtype=dtype, chunksize=chunk_size,
-                                     on_bad_lines='skip'):
-                chunks.append(chunk)
-        except pd.errors.ParserError as e:
-            print(f"Error parsing CSV file: {e}")
-        return pd.concat(chunks, ignore_index=True)
+        # Función para tratar con las líneas problemáticas de los csv, para evitar errores de tokenización
+        def read_csv_in_chunks(file_path, chunk_size=10000, encoding='latin1', dtype='str'):
+            chunks = []
+            try:
+                for chunk in pd.read_csv(file_path, encoding=encoding, dtype=dtype, chunksize=chunk_size,
+                                         on_bad_lines='skip'):
+                    chunks.append(chunk)
+            except pd.errors.ParserError as e:
+                print(f"Error parsing CSV file: {e}")
+            return pd.concat(chunks, ignore_index=True)
 
-    # TABLAS DE LAS BODEGAS A, G, E, N.
-    cohd_ingresos_mobu = pd.read_csv(
-        os.path.join(base_path, 'cohd.csv'), encoding='latin1', dtype='str')
-    rpshd_despachos_mobu = pd.read_csv(
-        os.path.join(base_path, 'rpshd.csv'), encoding='latin1', dtype='str')
-    rpsdt_productos_mobu = read_csv_in_chunks(
-        os.path.join(base_path, 'rpsdt.csv'))
-    registro_ingresos_mobu = pd.read_csv(
-        os.path.join(base_path, 'incompra.csv'), encoding='latin1', dtype='str')
-    registro_salidas_mobu = read_csv_in_chunks(
-        os.path.join(base_path, 'inmovid.csv'))
-    inmovih_table_mobu = pd.read_csv(
-        os.path.join(base_path, 'inmovih.csv'), encoding='latin1', dtype='str')
-    saldo_inventory_mobu = read_csv_in_chunks(
-        os.path.join(base_path, 'insaldo.csv'))
-    producto_modelos_mobu = read_csv_in_chunks(
-        os.path.join(base_path, 'inmodelo.csv'))
-    ctcentro_table_mobu = read_csv_in_chunks(
-        os.path.join(base_path, 'ctcentro.csv'))
+        task = progress.add_task("[green]Progress:", total=6)
 
-    # Leer el archivo con formato estándar
-    supplier_info_mobu = pd.read_csv(
-        os.path.join(base_path, 'incontac.csv'), encoding='latin1', dtype='str')
+        # TABLAS DE LAS BODEGAS A, G, E, N.
+        cohd_ingresos_mobu = pd.read_csv(
+            os.path.join(base_path, 'cohd.csv'), encoding='latin1', dtype='str')
+        rpshd_despachos_mobu = pd.read_csv(
+            os.path.join(base_path, 'rpshd.csv'), encoding='latin1', dtype='str')
+        rpsdt_productos_mobu = read_csv_in_chunks(
+            os.path.join(base_path, 'rpsdt.csv'))
+        registro_ingresos_mobu = pd.read_csv(
+            os.path.join(base_path, 'incompra.csv'), encoding='latin1', dtype='str')
+        registro_salidas_mobu = read_csv_in_chunks(
+            os.path.join(base_path, 'inmovid.csv'))
+        inmovih_table_mobu = pd.read_csv(
+            os.path.join(base_path, 'inmovih.csv'), encoding='latin1', dtype='str')
+        saldo_inventory_mobu = read_csv_in_chunks(
+            os.path.join(base_path, 'insaldo.csv'))
+        producto_modelos_mobu = read_csv_in_chunks(
+            os.path.join(base_path, 'inmodelo.csv'))
+        ctcentro_table_mobu = read_csv_in_chunks(
+            os.path.join(base_path, 'ctcentro.csv'))
 
-    dispatched_inventory_mobu = saldo_inventory_mobu
+        # Leer el archivo con formato estándar
+        supplier_info_mobu = pd.read_csv(
+            os.path.join(base_path, 'incontac.csv'), encoding='latin1', dtype='str')
 
-    # Verificar los nombres de las columnas correctas en supplier_info1
-    # Renombrar las columnas si es necesario
-    if 'codigo' in supplier_info_mobu.columns and 'nombre' in supplier_info_mobu.columns:
-        supplier_info_mobu = supplier_info_mobu.rename(columns={'codigo': 'idcontacto', 'nombre': 'descrip'})
+        dispatched_inventory_mobu = saldo_inventory_mobu
 
-    # Asegurar que las columnas 'idcontacto' y 'descrip' existan en supplier_info1
-    if 'idcontacto' in supplier_info_mobu.columns and 'descrip' in supplier_info_mobu.columns:
-        supplier_info_mobu = supplier_info_mobu[['idcontacto', 'descrip']]
+        # Step 1: MOBU Tables
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    # Crear la nueva columna 'idingreso' con los primeros 10 caracteres de 'idproducto'
-    rpsdt_productos_mobu['idingreso'] = rpsdt_productos_mobu['idproducto'].apply(lambda x: x[:10])
+        # Verificar los nombres de las columnas correctas en supplier_info1
+        # Renombrar las columnas si es necesario
+        if 'codigo' in supplier_info_mobu.columns and 'nombre' in supplier_info_mobu.columns:
+            supplier_info_mobu = supplier_info_mobu.rename(columns={'codigo': 'idcontacto', 'nombre': 'descrip'})
 
-    # Asegurar que 'idingreso' sea de tipo string
-    rpsdt_productos_mobu['idingreso'] = rpsdt_productos_mobu['idingreso'].astype(str)
+        # Asegurar que las columnas 'idcontacto' y 'descrip' existan en supplier_info1
+        if 'idcontacto' in supplier_info_mobu.columns and 'descrip' in supplier_info_mobu.columns:
+            supplier_info_mobu = supplier_info_mobu[['idcontacto', 'descrip']]
 
-    # print("\nSAN ANDRES MOBU:\n")
-    # print("Ingresos Status MOBU:\n ", cohd_ingresos_mobu.head())
-    # print("Despachos Status MOBU:\n ", rpshd_despachos_mobu.head())
-    # print("Despachos-Productos Status MOBU\n ", rpsdt_productos_mobu.head())
-    # print("Registro Ingresos MOBU: \n", registro_ingresos_mobu.head())
-    # print("Registro Salidas MOBU:\n ", registro_salidas_mobu.head())
-    # print("Tabla inmovih MOBU:\n ", inmovih_table_mobu.head())
-    # print("Saldo/Inventario MOBU:\n ", saldo_inventory_mobu.head())
-    # print("Contactos MOBU:\n ", supplier_info_mobu.head())
-    # print("CTCENTRO table MOBU:\n ", ctcentro_table_mobu.head())
-    # print("Productos MOBU:\n ", producto_modelos_mobu.head())
+        # Crear la nueva columna 'idingreso' con los primeros 10 caracteres de 'idproducto'
+        rpsdt_productos_mobu['idingreso'] = rpsdt_productos_mobu['idproducto'].apply(lambda x: x[:10])
 
-    cohd_ingresos_bodc = pd.read_csv(
-        os.path.join(base_path, 'cohd_c.csv'), encoding='latin1', dtype='str')
-    rpshd_despachos_bodc = pd.read_csv(
-        os.path.join(base_path, 'rpshd_c.csv'), encoding='latin1', dtype='str')
-    rpsdt_productos_bodc = read_csv_in_chunks(
-        os.path.join(base_path, 'rpsdt_c.csv'))
-    registro_ingresos_bodc = pd.read_csv(
-        os.path.join(base_path, 'incompra_c.csv'), encoding='latin1', dtype='str')
-    registro_salidas_bodc = read_csv_in_chunks(
-        os.path.join(base_path, 'inmovid_c.csv'))
-    inmovih_table_bodc = pd.read_csv(
-        os.path.join(base_path, 'inmovih_c.csv'), encoding='latin1', dtype='str')
-    saldo_inventory_bodc = read_csv_in_chunks(
-        os.path.join(base_path, 'insaldo_c.csv'))
-    producto_modelos_bodc = read_csv_in_chunks(
-        os.path.join(base_path, 'inmodelo_c.csv'))
-    ctcentro_table_bodc = read_csv_in_chunks(
-        os.path.join(base_path, 'ctcentro_c.csv'))
+        # Asegurar que 'idingreso' sea de tipo string
+        rpsdt_productos_mobu['idingreso'] = rpsdt_productos_mobu['idingreso'].astype(str)
 
-    supplier_info_bodc = pd.read_csv(
-        os.path.join(base_path, 'incontac_c.csv'), encoding='latin1', dtype='str')
+        cohd_ingresos_bodc = pd.read_csv(
+            os.path.join(base_path, 'cohd_c.csv'), encoding='latin1', dtype='str')
+        rpshd_despachos_bodc = pd.read_csv(
+            os.path.join(base_path, 'rpshd_c.csv'), encoding='latin1', dtype='str')
+        rpsdt_productos_bodc = read_csv_in_chunks(
+            os.path.join(base_path, 'rpsdt_c.csv'))
+        registro_ingresos_bodc = pd.read_csv(
+            os.path.join(base_path, 'incompra_c.csv'), encoding='latin1', dtype='str')
+        registro_salidas_bodc = read_csv_in_chunks(
+            os.path.join(base_path, 'inmovid_c.csv'))
+        inmovih_table_bodc = pd.read_csv(
+            os.path.join(base_path, 'inmovih_c.csv'), encoding='latin1', dtype='str')
+        saldo_inventory_bodc = read_csv_in_chunks(
+            os.path.join(base_path, 'insaldo_c.csv'))
+        producto_modelos_bodc = read_csv_in_chunks(
+            os.path.join(base_path, 'inmodelo_c.csv'))
+        ctcentro_table_bodc = read_csv_in_chunks(
+            os.path.join(base_path, 'ctcentro_c.csv'))
 
-    dispatched_inventory_bodc = saldo_inventory_bodc
+        supplier_info_bodc = pd.read_csv(
+            os.path.join(base_path, 'incontac_c.csv'), encoding='latin1', dtype='str')
 
-    # Crear la nueva columna 'idingreso' con los primeros 10 caracteres de 'idproducto'
-    rpsdt_productos_bodc['idingreso'] = rpsdt_productos_bodc['idproducto'].apply(lambda x: x[:10])
+        # Step 2: BODC tables
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    # Asegurar que 'idingreso' sea de tipo string
-    rpsdt_productos_bodc['idingreso'] = rpsdt_productos_bodc['idingreso'].astype(str)
+        dispatched_inventory_bodc = saldo_inventory_bodc
 
-    # Agregar diferenciador _c a cada idingreso para generar llave unica
-    saldo_inventory_bodc['idingreso'] = saldo_inventory_bodc['idingreso'].apply(
-        lambda x: str(x) + '_c' if pd.notna(x) else x)
-    registro_ingresos_bodc['idingreso'] = registro_ingresos_bodc['idingreso'].apply(
-        lambda x: str(x) + '_c' if pd.notna(x) else x)
-    saldo_inventory_bodc['idcontacto'] = saldo_inventory_bodc['idcontacto'].apply(
-        lambda x: str(x) + '_c' if pd.notna(x) else x)
-    saldo_inventory_bodc['idcentro'] = saldo_inventory_bodc['idcentro'].apply(
-        lambda x: str(x) + '_c' if pd.notna(x) else x)
-    saldo_inventory_bodc['retnum'] = saldo_inventory_bodc['retnum'].apply(
-        lambda x: str(x) + '_c' if pd.notna(x) else x)
-    cohd_ingresos_bodc['idcontacto'] = cohd_ingresos_bodc['idcontacto'].apply(
-        lambda x: str(x) + '_c' if pd.notna(x) else x)
-    cohd_ingresos_bodc['retnum'] = cohd_ingresos_bodc['retnum'].apply(
-        lambda x: str(x) + '_c' if pd.notna(x) else x)
-    cohd_ingresos_bodc['numero'] = cohd_ingresos_bodc['numero'].apply(
-        lambda x: str(x) + '_c' if pd.notna(x) else x)
-    registro_salidas_bodc['idingreso'] = registro_salidas_bodc['idingreso'].apply(
-        lambda x: str(x) + '_c' if pd.notna(x) else x)
-    registro_salidas_bodc['idcontacto'] = registro_salidas_bodc['idcontacto'].apply(
-        lambda x: str(x) + '_c' if pd.notna(x) else x)
-    registro_salidas_bodc['trannum'] = registro_salidas_bodc['trannum'].apply(
-        lambda x: str(x) + '_c' if pd.notna(x) else x)
-    registro_salidas_bodc['idcentro1'] = registro_salidas_bodc['idcentro1'].apply(
-        lambda x: str(x) + '_c' if pd.notna(x) else x)
-    registro_salidas_bodc['idcentro'] = registro_salidas_bodc['idcentro'].apply(
-        lambda x: str(x) + '_c' if pd.notna(x) else x)
-    registro_salidas_bodc['idmodelo'] = registro_salidas_bodc['idmodelo'].apply(
-        lambda x: str(x) + '_c' if pd.notna(x) else x)
-    registro_salidas_bodc['numero'] = registro_salidas_bodc['numero'].apply(
-        lambda x: str(x) + '_c' if pd.notna(x) else x)
-    registro_ingresos_bodc['idcontacto'] = registro_ingresos_bodc['idcontacto'].apply(
-        lambda x: str(x) + '_c' if pd.notna(x) else x)
-    registro_ingresos_bodc['retnum'] = registro_ingresos_bodc['retnum'].apply(
-        lambda x: str(x) + '_c' if pd.notna(x) else x)
-    registro_ingresos_bodc['referencia'] = registro_ingresos_bodc['referencia'].apply(
-        lambda x: str(x) + '_c' if pd.notna(x) else x)
-    supplier_info_bodc['idcontacto'] = supplier_info_bodc['idcontacto'].apply(
-        lambda x: str(x) + '_c' if pd.notna(x) else x)
-    ctcentro_table_bodc['idcentro'] = ctcentro_table_bodc['idcentro'].apply(
-        lambda x: str(x) + '_c' if pd.notna(x) else x)
-    inmovih_table_bodc['idcontacto'] = inmovih_table_bodc['idcontacto'].apply(
-        lambda x: str(x) + '_c' if pd.notna(x) else x)
-    inmovih_table_bodc['idcentro'] = inmovih_table_bodc['idcentro'].apply(
-        lambda x: str(x) + '_c' if pd.notna(x) else x)
-    inmovih_table_bodc['trannum'] = inmovih_table_bodc['trannum'].apply(
-        lambda x: str(x) + '_c' if pd.notna(x) else x)
-    inmovih_table_bodc['referencia'] = inmovih_table_bodc['referencia'].apply(
-        lambda x: str(x) + '_c' if pd.notna(x) else x)
-    inmovih_table_bodc['idcentro1'] = inmovih_table_bodc['idcentro1'].apply(
-        lambda x: str(x) + '_c' if pd.notna(x) else x)
-    rpsdt_productos_bodc['idcontacto'] = rpsdt_productos_bodc['idcontacto'].apply(
-        lambda x: str(x) + '_c' if pd.notna(x) else x)
-    rpsdt_productos_bodc['numero'] = rpsdt_productos_bodc['numero'].apply(
-        lambda x: str(x) + '_c' if pd.notna(x) else x)
-    rpsdt_productos_bodc['idingreso'] = rpsdt_productos_bodc['idingreso'].apply(
-        lambda x: str(x) + '_c' if pd.notna(x) else x)
-    rpsdt_productos_bodc['idmodelo'] = rpsdt_productos_bodc['idmodelo'].apply(
-        lambda x: str(x) + '_c' if pd.notna(x) else x)
-    rpshd_despachos_bodc['idcentro1'] = rpshd_despachos_bodc['idcentro1'].apply(
-        lambda x: str(x) + '_c' if pd.notna(x) else x)
-    rpshd_despachos_bodc['idcentro'] = rpshd_despachos_bodc['idcentro'].apply(
-        lambda x: str(x) + '_c' if pd.notna(x) else x)
-    rpshd_despachos_bodc['referencia'] = rpshd_despachos_bodc['referencia'].apply(
-        lambda x: str(x) + '_c' if pd.notna(x) else x)
-    rpshd_despachos_bodc['numero'] = rpshd_despachos_bodc['numero'].apply(
-        lambda x: str(x) + '_c' if pd.notna(x) else x)
-    rpshd_despachos_bodc['trannum'] = rpshd_despachos_bodc['trannum'].apply(
-        lambda x: str(x) + '_c' if pd.notna(x) else x)
+        # Crear la nueva columna 'idingreso' con los primeros 10 caracteres de 'idproducto'
+        rpsdt_productos_bodc['idingreso'] = rpsdt_productos_bodc['idproducto'].apply(lambda x: x[:10])
 
-    # print("SAN ANDRES BODC:\n")
-    # print("Ingresos Status BODC:\n ", cohd_ingresos_bodc.head())
-    # print("Despachos Status BODC:\n ", rpshd_despachos_bodc.head())
-    # print("Despachos-Productos Status BODC:\n ", rpsdt_productos_bodc.head())
-    # print("Registro Ingresos BODC:\n ", registro_ingresos_bodc.head())
-    # print("Registro Salidas BODC:\n ", registro_salidas_bodc.head())
-    # print("Tabla inmovih BODC:\n ", inmovih_table_bodc.head())
-    # print("Saldo/Inventario BODC:\n ", saldo_inventory_bodc.head())
-    # print("Contactos BODC:\n ", supplier_info_bodc.head())
-    # print("CTCENTRO table BODC:\n ", ctcentro_table_bodc.head())
-    # print("Productos BODC:\n ", producto_modelos_bodc.head())
+        # Asegurar que 'idingreso' sea de tipo string
+        rpsdt_productos_bodc['idingreso'] = rpsdt_productos_bodc['idingreso'].astype(str)
 
-    cohd_ingresos_bode = pd.read_csv(
-        os.path.join(base_path, 'cohd_e.csv'), encoding='latin1', dtype='str')
-    rpshd_despachos_bode = pd.read_csv(
-        os.path.join(base_path, 'rpshd_e.csv'), encoding='latin1', dtype='str')
-    rpsdt_productos_bode = read_csv_in_chunks(
-        os.path.join(base_path, 'rpsdt_e.csv'))
-    registro_ingresos_bode = pd.read_csv(
-        os.path.join(base_path, 'incompra_e.csv'), encoding='latin1', dtype='str')
-    registro_salidas_bode = read_csv_in_chunks(
-        os.path.join(base_path, 'inmovid_e.csv'))
-    inmovih_table_bode = pd.read_csv(
-        os.path.join(base_path, 'inmovih_e.csv'), encoding='latin1', dtype='str')
-    saldo_inventory_bode = read_csv_in_chunks(
-        os.path.join(base_path, 'insaldo_e.csv'))
-    producto_modelos_bode = read_csv_in_chunks(
-        os.path.join(base_path, 'inmodelo_e.csv'))
-    ctcentro_table_bode = read_csv_in_chunks(
-        os.path.join(base_path, 'ctcentro_e.csv'))
+        # Agregar diferenciador _c a cada idingreso para generar llave unica
+        saldo_inventory_bodc['idingreso'] = saldo_inventory_bodc['idingreso'].apply(
+            lambda x: str(x) + '_c' if pd.notna(x) else x)
+        registro_ingresos_bodc['idingreso'] = registro_ingresos_bodc['idingreso'].apply(
+            lambda x: str(x) + '_c' if pd.notna(x) else x)
+        saldo_inventory_bodc['idcontacto'] = saldo_inventory_bodc['idcontacto'].apply(
+            lambda x: str(x) + '_c' if pd.notna(x) else x)
+        saldo_inventory_bodc['idcentro'] = saldo_inventory_bodc['idcentro'].apply(
+            lambda x: str(x) + '_c' if pd.notna(x) else x)
+        saldo_inventory_bodc['retnum'] = saldo_inventory_bodc['retnum'].apply(
+            lambda x: str(x) + '_c' if pd.notna(x) else x)
+        cohd_ingresos_bodc['idcontacto'] = cohd_ingresos_bodc['idcontacto'].apply(
+            lambda x: str(x) + '_c' if pd.notna(x) else x)
+        cohd_ingresos_bodc['retnum'] = cohd_ingresos_bodc['retnum'].apply(
+            lambda x: str(x) + '_c' if pd.notna(x) else x)
+        cohd_ingresos_bodc['numero'] = cohd_ingresos_bodc['numero'].apply(
+            lambda x: str(x) + '_c' if pd.notna(x) else x)
+        registro_salidas_bodc['idingreso'] = registro_salidas_bodc['idingreso'].apply(
+            lambda x: str(x) + '_c' if pd.notna(x) else x)
+        registro_salidas_bodc['idcontacto'] = registro_salidas_bodc['idcontacto'].apply(
+            lambda x: str(x) + '_c' if pd.notna(x) else x)
+        registro_salidas_bodc['trannum'] = registro_salidas_bodc['trannum'].apply(
+            lambda x: str(x) + '_c' if pd.notna(x) else x)
+        registro_salidas_bodc['idcentro1'] = registro_salidas_bodc['idcentro1'].apply(
+            lambda x: str(x) + '_c' if pd.notna(x) else x)
+        registro_salidas_bodc['idcentro'] = registro_salidas_bodc['idcentro'].apply(
+            lambda x: str(x) + '_c' if pd.notna(x) else x)
+        registro_salidas_bodc['idmodelo'] = registro_salidas_bodc['idmodelo'].apply(
+            lambda x: str(x) + '_c' if pd.notna(x) else x)
+        registro_salidas_bodc['numero'] = registro_salidas_bodc['numero'].apply(
+            lambda x: str(x) + '_c' if pd.notna(x) else x)
+        registro_ingresos_bodc['idcontacto'] = registro_ingresos_bodc['idcontacto'].apply(
+            lambda x: str(x) + '_c' if pd.notna(x) else x)
+        registro_ingresos_bodc['retnum'] = registro_ingresos_bodc['retnum'].apply(
+            lambda x: str(x) + '_c' if pd.notna(x) else x)
+        registro_ingresos_bodc['referencia'] = registro_ingresos_bodc['referencia'].apply(
+            lambda x: str(x) + '_c' if pd.notna(x) else x)
+        supplier_info_bodc['idcontacto'] = supplier_info_bodc['idcontacto'].apply(
+            lambda x: str(x) + '_c' if pd.notna(x) else x)
+        ctcentro_table_bodc['idcentro'] = ctcentro_table_bodc['idcentro'].apply(
+            lambda x: str(x) + '_c' if pd.notna(x) else x)
+        inmovih_table_bodc['idcontacto'] = inmovih_table_bodc['idcontacto'].apply(
+            lambda x: str(x) + '_c' if pd.notna(x) else x)
+        inmovih_table_bodc['idcentro'] = inmovih_table_bodc['idcentro'].apply(
+            lambda x: str(x) + '_c' if pd.notna(x) else x)
+        inmovih_table_bodc['trannum'] = inmovih_table_bodc['trannum'].apply(
+            lambda x: str(x) + '_c' if pd.notna(x) else x)
+        inmovih_table_bodc['referencia'] = inmovih_table_bodc['referencia'].apply(
+            lambda x: str(x) + '_c' if pd.notna(x) else x)
+        inmovih_table_bodc['idcentro1'] = inmovih_table_bodc['idcentro1'].apply(
+            lambda x: str(x) + '_c' if pd.notna(x) else x)
+        rpsdt_productos_bodc['idcontacto'] = rpsdt_productos_bodc['idcontacto'].apply(
+            lambda x: str(x) + '_c' if pd.notna(x) else x)
+        rpsdt_productos_bodc['numero'] = rpsdt_productos_bodc['numero'].apply(
+            lambda x: str(x) + '_c' if pd.notna(x) else x)
+        rpsdt_productos_bodc['idingreso'] = rpsdt_productos_bodc['idingreso'].apply(
+            lambda x: str(x) + '_c' if pd.notna(x) else x)
+        rpsdt_productos_bodc['idmodelo'] = rpsdt_productos_bodc['idmodelo'].apply(
+            lambda x: str(x) + '_c' if pd.notna(x) else x)
+        rpshd_despachos_bodc['idcentro1'] = rpshd_despachos_bodc['idcentro1'].apply(
+            lambda x: str(x) + '_c' if pd.notna(x) else x)
+        rpshd_despachos_bodc['idcentro'] = rpshd_despachos_bodc['idcentro'].apply(
+            lambda x: str(x) + '_c' if pd.notna(x) else x)
+        rpshd_despachos_bodc['referencia'] = rpshd_despachos_bodc['referencia'].apply(
+            lambda x: str(x) + '_c' if pd.notna(x) else x)
+        rpshd_despachos_bodc['numero'] = rpshd_despachos_bodc['numero'].apply(
+            lambda x: str(x) + '_c' if pd.notna(x) else x)
+        rpshd_despachos_bodc['trannum'] = rpshd_despachos_bodc['trannum'].apply(
+            lambda x: str(x) + '_c' if pd.notna(x) else x)
 
-    dispatched_inventory_bode = saldo_inventory_bode
+        # Step 3: implementing BODC key
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    supplier_info_bode = pd.read_csv(
-        os.path.join(base_path, 'incontac_e.csv'), encoding='latin1', dtype='str')
+        cohd_ingresos_bode = pd.read_csv(
+            os.path.join(base_path, 'cohd_e.csv'), encoding='latin1', dtype='str')
+        rpshd_despachos_bode = pd.read_csv(
+            os.path.join(base_path, 'rpshd_e.csv'), encoding='latin1', dtype='str')
+        rpsdt_productos_bode = read_csv_in_chunks(
+            os.path.join(base_path, 'rpsdt_e.csv'))
+        registro_ingresos_bode = pd.read_csv(
+            os.path.join(base_path, 'incompra_e.csv'), encoding='latin1', dtype='str')
+        registro_salidas_bode = read_csv_in_chunks(
+            os.path.join(base_path, 'inmovid_e.csv'))
+        inmovih_table_bode = pd.read_csv(
+            os.path.join(base_path, 'inmovih_e.csv'), encoding='latin1', dtype='str')
+        saldo_inventory_bode = read_csv_in_chunks(
+            os.path.join(base_path, 'insaldo_e.csv'))
+        producto_modelos_bode = read_csv_in_chunks(
+            os.path.join(base_path, 'inmodelo_e.csv'))
+        ctcentro_table_bode = read_csv_in_chunks(
+            os.path.join(base_path, 'ctcentro_e.csv'))
 
-    # Crear la nueva columna 'idingreso' con los primeros 10 caracteres de 'idproducto'
-    rpsdt_productos_bode['idingreso'] = rpsdt_productos_bode['idproducto'].apply(lambda x: x[:10])
+        # Step 4: Loading BODE tables
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    # Asegurar que 'idingreso' sea de tipo string
-    rpsdt_productos_bode['idingreso'] = rpsdt_productos_bode['idingreso'].astype(str)
+        dispatched_inventory_bode = saldo_inventory_bode
 
-    # Agregar diferenciador _c a cada idingreso para generar llave unica
-    saldo_inventory_bode['idingreso'] = saldo_inventory_bode['idingreso'].apply(
-        lambda x: str(x) + '_e' if pd.notna(x) else x)
-    registro_ingresos_bode['idingreso'] = registro_ingresos_bode['idingreso'].apply(
-        lambda x: str(x) + '_e' if pd.notna(x) else x)
-    saldo_inventory_bode['idcontacto'] = saldo_inventory_bode['idcontacto'].apply(
-        lambda x: str(x) + '_e' if pd.notna(x) else x)
-    saldo_inventory_bode['idcentro'] = saldo_inventory_bode['idcentro'].apply(
-        lambda x: str(x) + '_e' if pd.notna(x) else x)
-    saldo_inventory_bode['retnum'] = saldo_inventory_bode['retnum'].apply(
-        lambda x: str(x) + '_e' if pd.notna(x) else x)
-    cohd_ingresos_bode['idcontacto'] = cohd_ingresos_bode['idcontacto'].apply(
-        lambda x: str(x) + '_e' if pd.notna(x) else x)
-    cohd_ingresos_bode['retnum'] = cohd_ingresos_bode['retnum'].apply(
-        lambda x: str(x) + '_e' if pd.notna(x) else x)
-    cohd_ingresos_bode['numero'] = cohd_ingresos_bode['numero'].apply(
-        lambda x: str(x) + '_e' if pd.notna(x) else x)
-    registro_salidas_bode['idingreso'] = registro_salidas_bode['idingreso'].apply(
-        lambda x: str(x) + '_e' if pd.notna(x) else x)
-    registro_salidas_bode['idcontacto'] = registro_salidas_bode['idcontacto'].apply(
-        lambda x: str(x) + '_e' if pd.notna(x) else x)
-    registro_salidas_bode['trannum'] = registro_salidas_bode['trannum'].apply(
-        lambda x: str(x) + '_e' if pd.notna(x) else x)
-    registro_salidas_bode['idcentro1'] = registro_salidas_bode['idcentro1'].apply(
-        lambda x: str(x) + '_e' if pd.notna(x) else x)
-    registro_salidas_bode['idcentro'] = registro_salidas_bode['idcentro'].apply(
-        lambda x: str(x) + '_e' if pd.notna(x) else x)
-    registro_salidas_bode['idmodelo'] = registro_salidas_bode['idmodelo'].apply(
-        lambda x: str(x) + '_e' if pd.notna(x) else x)
-    registro_salidas_bode['numero'] = registro_salidas_bode['numero'].apply(
-        lambda x: str(x) + '_e' if pd.notna(x) else x)
-    registro_ingresos_bode['idcontacto'] = registro_ingresos_bode['idcontacto'].apply(
-        lambda x: str(x) + '_e' if pd.notna(x) else x)
-    registro_ingresos_bode['retnum'] = registro_ingresos_bode['retnum'].apply(
-        lambda x: str(x) + '_e' if pd.notna(x) else x)
-    registro_ingresos_bode['referencia'] = registro_ingresos_bode['referencia'].apply(
-        lambda x: str(x) + '_e' if pd.notna(x) else x)
-    supplier_info_bode['idcontacto'] = supplier_info_bode['idcontacto'].apply(
-        lambda x: str(x) + '_e' if pd.notna(x) else x)
-    ctcentro_table_bode['idcentro'] = ctcentro_table_bode['idcentro'].apply(
-        lambda x: str(x) + '_e' if pd.notna(x) else x)
-    inmovih_table_bode['idcontacto'] = inmovih_table_bode['idcontacto'].apply(
-        lambda x: str(x) + '_e' if pd.notna(x) else x)
-    inmovih_table_bode['idcentro'] = inmovih_table_bode['idcentro'].apply(
-        lambda x: str(x) + '_e' if pd.notna(x) else x)
-    inmovih_table_bode['trannum'] = inmovih_table_bode['trannum'].apply(
-        lambda x: str(x) + '_e' if pd.notna(x) else x)
-    inmovih_table_bode['referencia'] = inmovih_table_bode['referencia'].apply(
-        lambda x: str(x) + '_e' if pd.notna(x) else x)
-    inmovih_table_bode['idcentro1'] = inmovih_table_bode['idcentro1'].apply(
-        lambda x: str(x) + '_e' if pd.notna(x) else x)
-    rpsdt_productos_bode['idcontacto'] = rpsdt_productos_bode['idcontacto'].apply(
-        lambda x: str(x) + '_e' if pd.notna(x) else x)
-    rpsdt_productos_bode['numero'] = rpsdt_productos_bode['numero'].apply(
-        lambda x: str(x) + '_e' if pd.notna(x) else x)
-    rpsdt_productos_bode['idingreso'] = rpsdt_productos_bode['idingreso'].apply(
-        lambda x: str(x) + '_e' if pd.notna(x) else x)
-    rpsdt_productos_bode['idmodelo'] = rpsdt_productos_bode['idmodelo'].apply(
-        lambda x: str(x) + '_e' if pd.notna(x) else x)
-    rpshd_despachos_bode['idcentro1'] = rpshd_despachos_bode['idcentro1'].apply(
-        lambda x: str(x) + '_e' if pd.notna(x) else x)
-    rpshd_despachos_bode['idcentro'] = rpshd_despachos_bode['idcentro'].apply(
-        lambda x: str(x) + '_e' if pd.notna(x) else x)
-    rpshd_despachos_bode['referencia'] = rpshd_despachos_bode['referencia'].apply(
-        lambda x: str(x) + '_e' if pd.notna(x) else x)
-    rpshd_despachos_bode['numero'] = rpshd_despachos_bode['numero'].apply(
-        lambda x: str(x) + '_e' if pd.notna(x) else x)
-    rpshd_despachos_bode['trannum'] = rpshd_despachos_bode['trannum'].apply(
-        lambda x: str(x) + '_e' if pd.notna(x) else x)
+        supplier_info_bode = pd.read_csv(
+            os.path.join(base_path, 'incontac_e.csv'), encoding='latin1', dtype='str')
 
-    # print("SAN ANDRES BODE:\n")
-    # print("Ingresos Status BODE:\n ", cohd_ingresos_bode.head())
-    # print("Despachos Status BODE:\n ", rpshd_despachos_bode.head())
-    # print("Despachos-Productos Status BODE:\n ", rpsdt_productos_bode.head())
-    # print("Registro Ingresos BODE:\n ", registro_ingresos_bode.head())
-    # print("Registro Salidas BODE:\n ", registro_salidas_bode.head())
-    # print("Tabla inmovih BODE:\n ", inmovih_table_bode.head())
-    # print("Saldo/Inventario BODE:\n ", saldo_inventory_bode.head())
-    # print("Contactos BODE:\n ", supplier_info_bode.head())
-    # print("CTCENTRO table BODE:\n ", ctcentro_table_bode.head())
-    # print("Productos BODE:\n ", producto_modelos_bode.head())
+        # Crear la nueva columna 'idingreso' con los primeros 10 caracteres de 'idproducto'
+        rpsdt_productos_bode['idingreso'] = rpsdt_productos_bode['idproducto'].apply(lambda x: x[:10])
 
-    # Function to concatenate tables with union approach, ensuring output is a DataFrame
-    def concatenate_tables_union(table_list, table_name):
-        concatenated_df = pd.concat(table_list, axis=0, ignore_index=True, sort=False)
-        if not isinstance(concatenated_df, pd.DataFrame):
-            raise TypeError(f"The concatenated result for {table_name} is not a DataFrame")
-        return concatenated_df
+        # Asegurar que 'idingreso' sea de tipo string
+        rpsdt_productos_bode['idingreso'] = rpsdt_productos_bode['idingreso'].astype(str)
 
-    # Grouping tables as before
-    ingresos_tables = [cohd_ingresos_mobu, cohd_ingresos_bodc, cohd_ingresos_bode]
-    despachos_tables = [rpshd_despachos_mobu, rpshd_despachos_bodc, rpshd_despachos_bode]
-    productos_tables = [rpsdt_productos_mobu, rpsdt_productos_bodc, rpsdt_productos_bode]
-    registro_ingresos_tables = [registro_ingresos_mobu, registro_ingresos_bodc, registro_ingresos_bode]
-    registro_salidas_tables = [registro_salidas_mobu, registro_salidas_bodc, registro_salidas_bode]
-    inmovih_tables = [inmovih_table_mobu, inmovih_table_bodc, inmovih_table_bode]
-    saldo_inventory_tables = [saldo_inventory_mobu, saldo_inventory_bodc, saldo_inventory_bode]
-    producto_modelos_tables = [producto_modelos_mobu, producto_modelos_bodc, producto_modelos_bode]
-    ctcentro_tables = [ctcentro_table_mobu, ctcentro_table_bodc, ctcentro_table_bode]
-    supplier_info_tables = [supplier_info_mobu, supplier_info_bodc, supplier_info_bode]
-    dispatched_inventory_tables = [dispatched_inventory_mobu, dispatched_inventory_bodc, dispatched_inventory_bode]
+        # Agregar diferenciador _c a cada idingreso para generar llave unica
+        saldo_inventory_bode['idingreso'] = saldo_inventory_bode['idingreso'].apply(
+            lambda x: str(x) + '_e' if pd.notna(x) else x)
+        registro_ingresos_bode['idingreso'] = registro_ingresos_bode['idingreso'].apply(
+            lambda x: str(x) + '_e' if pd.notna(x) else x)
+        saldo_inventory_bode['idcontacto'] = saldo_inventory_bode['idcontacto'].apply(
+            lambda x: str(x) + '_e' if pd.notna(x) else x)
+        saldo_inventory_bode['idcentro'] = saldo_inventory_bode['idcentro'].apply(
+            lambda x: str(x) + '_e' if pd.notna(x) else x)
+        saldo_inventory_bode['retnum'] = saldo_inventory_bode['retnum'].apply(
+            lambda x: str(x) + '_e' if pd.notna(x) else x)
+        cohd_ingresos_bode['idcontacto'] = cohd_ingresos_bode['idcontacto'].apply(
+            lambda x: str(x) + '_e' if pd.notna(x) else x)
+        cohd_ingresos_bode['retnum'] = cohd_ingresos_bode['retnum'].apply(
+            lambda x: str(x) + '_e' if pd.notna(x) else x)
+        cohd_ingresos_bode['numero'] = cohd_ingresos_bode['numero'].apply(
+            lambda x: str(x) + '_e' if pd.notna(x) else x)
+        registro_salidas_bode['idingreso'] = registro_salidas_bode['idingreso'].apply(
+            lambda x: str(x) + '_e' if pd.notna(x) else x)
+        registro_salidas_bode['idcontacto'] = registro_salidas_bode['idcontacto'].apply(
+            lambda x: str(x) + '_e' if pd.notna(x) else x)
+        registro_salidas_bode['trannum'] = registro_salidas_bode['trannum'].apply(
+            lambda x: str(x) + '_e' if pd.notna(x) else x)
+        registro_salidas_bode['idcentro1'] = registro_salidas_bode['idcentro1'].apply(
+            lambda x: str(x) + '_e' if pd.notna(x) else x)
+        registro_salidas_bode['idcentro'] = registro_salidas_bode['idcentro'].apply(
+            lambda x: str(x) + '_e' if pd.notna(x) else x)
+        registro_salidas_bode['idmodelo'] = registro_salidas_bode['idmodelo'].apply(
+            lambda x: str(x) + '_e' if pd.notna(x) else x)
+        registro_salidas_bode['numero'] = registro_salidas_bode['numero'].apply(
+            lambda x: str(x) + '_e' if pd.notna(x) else x)
+        registro_ingresos_bode['idcontacto'] = registro_ingresos_bode['idcontacto'].apply(
+            lambda x: str(x) + '_e' if pd.notna(x) else x)
+        registro_ingresos_bode['retnum'] = registro_ingresos_bode['retnum'].apply(
+            lambda x: str(x) + '_e' if pd.notna(x) else x)
+        registro_ingresos_bode['referencia'] = registro_ingresos_bode['referencia'].apply(
+            lambda x: str(x) + '_e' if pd.notna(x) else x)
+        supplier_info_bode['idcontacto'] = supplier_info_bode['idcontacto'].apply(
+            lambda x: str(x) + '_e' if pd.notna(x) else x)
+        ctcentro_table_bode['idcentro'] = ctcentro_table_bode['idcentro'].apply(
+            lambda x: str(x) + '_e' if pd.notna(x) else x)
+        inmovih_table_bode['idcontacto'] = inmovih_table_bode['idcontacto'].apply(
+            lambda x: str(x) + '_e' if pd.notna(x) else x)
+        inmovih_table_bode['idcentro'] = inmovih_table_bode['idcentro'].apply(
+            lambda x: str(x) + '_e' if pd.notna(x) else x)
+        inmovih_table_bode['trannum'] = inmovih_table_bode['trannum'].apply(
+            lambda x: str(x) + '_e' if pd.notna(x) else x)
+        inmovih_table_bode['referencia'] = inmovih_table_bode['referencia'].apply(
+            lambda x: str(x) + '_e' if pd.notna(x) else x)
+        inmovih_table_bode['idcentro1'] = inmovih_table_bode['idcentro1'].apply(
+            lambda x: str(x) + '_e' if pd.notna(x) else x)
+        rpsdt_productos_bode['idcontacto'] = rpsdt_productos_bode['idcontacto'].apply(
+            lambda x: str(x) + '_e' if pd.notna(x) else x)
+        rpsdt_productos_bode['numero'] = rpsdt_productos_bode['numero'].apply(
+            lambda x: str(x) + '_e' if pd.notna(x) else x)
+        rpsdt_productos_bode['idingreso'] = rpsdt_productos_bode['idingreso'].apply(
+            lambda x: str(x) + '_e' if pd.notna(x) else x)
+        rpsdt_productos_bode['idmodelo'] = rpsdt_productos_bode['idmodelo'].apply(
+            lambda x: str(x) + '_e' if pd.notna(x) else x)
+        rpshd_despachos_bode['idcentro1'] = rpshd_despachos_bode['idcentro1'].apply(
+            lambda x: str(x) + '_e' if pd.notna(x) else x)
+        rpshd_despachos_bode['idcentro'] = rpshd_despachos_bode['idcentro'].apply(
+            lambda x: str(x) + '_e' if pd.notna(x) else x)
+        rpshd_despachos_bode['referencia'] = rpshd_despachos_bode['referencia'].apply(
+            lambda x: str(x) + '_e' if pd.notna(x) else x)
+        rpshd_despachos_bode['numero'] = rpshd_despachos_bode['numero'].apply(
+            lambda x: str(x) + '_e' if pd.notna(x) else x)
+        rpshd_despachos_bode['trannum'] = rpshd_despachos_bode['trannum'].apply(
+            lambda x: str(x) + '_e' if pd.notna(x) else x)
 
-    # Use the union approach for concatenation
-    wl_ingresos = concatenate_tables_union(ingresos_tables, "Ingresos")
-    rpshd_despachos = concatenate_tables_union(despachos_tables, "Despachos")
-    rpsdt_productos = concatenate_tables_union(productos_tables, "Productos")
-    registro_ingresos = concatenate_tables_union(registro_ingresos_tables, "Registro Ingresos")
-    registro_salidas = concatenate_tables_union(registro_salidas_tables, "Registro Salidas")
-    inmovih_table = concatenate_tables_union(inmovih_tables, "Inmovih")
-    saldo_inventory = concatenate_tables_union(saldo_inventory_tables, "Saldo Inventory")
-    producto_modelos = concatenate_tables_union(producto_modelos_tables, "Producto Modelos")
-    ctcentro_table = concatenate_tables_union(ctcentro_tables, "Ctcentro")
-    supplier_info = concatenate_tables_union(supplier_info_tables, "Supplier Info")
-    dispatched_inventory = concatenate_tables_union(dispatched_inventory_tables, "Inventario Despachado")
+        # Step 5: implementing BODE key
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    inventario_sin_filtro = saldo_inventory
+        # print("SAN ANDRES BODE:\n")
+        # print("Ingresos Status BODE:\n ", cohd_ingresos_bode.head())
+        # print("Despachos Status BODE:\n ", rpshd_despachos_bode.head())
+        # print("Despachos-Productos Status BODE:\n ", rpsdt_productos_bode.head())
+        # print("Registro Ingresos BODE:\n ", registro_ingresos_bode.head())
+        # print("Registro Salidas BODE:\n ", registro_salidas_bode.head())
+        # print("Tabla inmovih BODE:\n ", inmovih_table_bode.head())
+        # print("Saldo/Inventario BODE:\n ", saldo_inventory_bode.head())
+        # print("Contactos BODE:\n ", supplier_info_bode.head())
+        # print("CTCENTRO table BODE:\n ", ctcentro_table_bode.head())
+        # print("Productos BODE:\n ", producto_modelos_bode.head())
+
+        # Function to concatenate tables with union approach, ensuring output is a DataFrame
+        def concatenate_tables_union(table_list, table_name):
+            concatenated_df = pd.concat(table_list, axis=0, ignore_index=True, sort=False)
+            if not isinstance(concatenated_df, pd.DataFrame):
+                raise TypeError(f"The concatenated result for {table_name} is not a DataFrame")
+            return concatenated_df
+
+        # Grouping tables as before
+        ingresos_tables = [cohd_ingresos_mobu, cohd_ingresos_bodc, cohd_ingresos_bode]
+        despachos_tables = [rpshd_despachos_mobu, rpshd_despachos_bodc, rpshd_despachos_bode]
+        productos_tables = [rpsdt_productos_mobu, rpsdt_productos_bodc, rpsdt_productos_bode]
+        registro_ingresos_tables = [registro_ingresos_mobu, registro_ingresos_bodc, registro_ingresos_bode]
+        registro_salidas_tables = [registro_salidas_mobu, registro_salidas_bodc, registro_salidas_bode]
+        inmovih_tables = [inmovih_table_mobu, inmovih_table_bodc, inmovih_table_bode]
+        saldo_inventory_tables = [saldo_inventory_mobu, saldo_inventory_bodc, saldo_inventory_bode]
+        producto_modelos_tables = [producto_modelos_mobu, producto_modelos_bodc, producto_modelos_bode]
+        ctcentro_tables = [ctcentro_table_mobu, ctcentro_table_bodc, ctcentro_table_bode]
+        supplier_info_tables = [supplier_info_mobu, supplier_info_bodc, supplier_info_bode]
+        dispatched_inventory_tables = [dispatched_inventory_mobu, dispatched_inventory_bodc, dispatched_inventory_bode]
+
+        # Use the union approach for concatenation
+        wl_ingresos = concatenate_tables_union(ingresos_tables, "Ingresos")
+        rpshd_despachos = concatenate_tables_union(despachos_tables, "Despachos")
+        rpsdt_productos = concatenate_tables_union(productos_tables, "Productos")
+        registro_ingresos = concatenate_tables_union(registro_ingresos_tables, "Registro Ingresos")
+        registro_salidas = concatenate_tables_union(registro_salidas_tables, "Registro Salidas")
+        inmovih_table = concatenate_tables_union(inmovih_tables, "Inmovih")
+        saldo_inventory = concatenate_tables_union(saldo_inventory_tables, "Saldo Inventory")
+        producto_modelos = concatenate_tables_union(producto_modelos_tables, "Producto Modelos")
+        ctcentro_table = concatenate_tables_union(ctcentro_tables, "Ctcentro")
+        supplier_info = concatenate_tables_union(supplier_info_tables, "Supplier Info")
+        dispatched_inventory = concatenate_tables_union(dispatched_inventory_tables, "Inventario Despachado")
+
+        inventario_sin_filtro = saldo_inventory
+
+        # Step 6: Concatenating tables
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
+        print("Data loaded correctly.\n")
 
     # print("\nSAN ANDRES DESPUÉS DE CONCATENAR LAS BODEGAS:\n")
     # print("Ingresos Status:\n", wl_ingresos.head(50))
@@ -454,200 +484,205 @@ def load_data():
 def data_processing(wl_ingresos, rpshd_despachos, rpsdt_productos, registro_ingresos,
                     registro_salidas, inmovih_table, saldo_inventory, supplier_info, ctcentro_table,
                     producto_modelos, dispatched_inventory, inventario_sin_filtro):
+    with Progress() as progress:
+        task = progress.add_task("[green]Processing Data: ", total=6)
 
+        dispatched_inventory = dispatched_inventory[[
+            'idcentro', 'idbodega', 'idingreso', 'itemno', 'idstatus', 'idmodelo', 'idcoldis',
+            'fecha', 'ingresa', 'idcontacto', 'retnum', 'idubica', 'pesokgs', 'equipo', 'inicial', 'salidas',
+            'idpedido',
+            'idubica1',
+            'idproducto']]
 
-    # Eliminar columnas/filas no deseadas
+        # print(" \n Eliminando columnas de rpsdt_productos SA...")
+        rpsdt_productos = rpsdt_productos.loc[:,
+                          ['numero', 'itemline', 'estatus', 'idproducto', 'idcontacto', 'idmodelo',
+                           'idcoldis', 'idubica', 'cantidad', 'equipo', 'idubica1', 'idingreso', 'ingresa']]
 
-    # print("\n Eliminando columnas de dispatched_inventory SA...")
-    # print("Columnas saldo_inventory SA...", dispatched_inventory.columns)
-    dispatched_inventory = dispatched_inventory[[
-        'idcentro', 'idbodega', 'idingreso', 'itemno', 'idstatus', 'idmodelo', 'idcoldis',
-        'fecha', 'ingresa', 'idcontacto', 'retnum', 'idubica', 'pesokgs', 'equipo', 'inicial', 'salidas', 'idpedido',
-        'idubica1',
-        'idproducto']]
-    # print("Columnas resultantes saldo_inventory SA...", dispatched_inventory.columns)
+        # print(" \n Eliminando columnas de rpshd_despachos SA...")
+        rpshd_despachos = rpshd_despachos.loc[:, ['numero', 'estatus', 'tipo', 'fecha', 'idcentro', 'idcentro1',
+                                                  'descrip', 'itemcount', 'pzascan', 'trannum', 'equipo']]
 
-    # print(" \n Eliminando columnas de rpsdt_productos SA...")
-    rpsdt_productos = rpsdt_productos.loc[:,
-                      ['numero', 'itemline', 'estatus', 'idproducto', 'idcontacto', 'idmodelo',
-                       'idcoldis', 'idubica', 'cantidad', 'equipo', 'idubica1', 'idingreso', 'ingresa']]
-    # print("Columnas resultantes rpsdt_productos SA...", rpsdt_productos.columns)
+        #     print("\n Eliminando columnas de saldo_inventory SA...")
+        saldo_inventory = saldo_inventory[[
+            'idcentro', 'idbodega', 'idingreso', 'itemno', 'idstatus', 'idmodelo', 'idcoldis',
+            'fecha', 'idcontacto', 'retnum', 'idubica', 'pesokgs', 'equipo', 'inicial', 'salidas', 'idubica1',
+            'idproducto']]
 
-    # print(" \n Eliminando columnas de rpshd_despachos SA...")
-    rpshd_despachos = rpshd_despachos.loc[:, ['numero', 'estatus', 'tipo', 'fecha', 'idcentro', 'idcentro1',
-                                              'descrip', 'itemcount', 'pzascan', 'trannum', 'equipo']]
+        #     print("\nEliminando columnas de registro_salidas SA...")
+        registro_salidas = registro_salidas[['trannum', 'lineano', 'fecha', 'cantidad', 'idmodelo', 'idcoldis',
+                                             'idingreso', 'itemno', 'idcontacto', 'equipo', 'idcentro', 'idcentro1',
+                                             'idclase', 'numero']]
 
-    # print("Columnas resultantes rpshd_despachos SA...", rpshd_despachos.columns)
+        #     print("\nEliminando columnas de registro_ingresos SA...")
+        registro_ingresos = registro_ingresos[['idingreso', 'fecha', 'items', 'transtatus', 'descrip', 'available',
+                                               'equipo', 'idcontacto', 'retnum']]
 
-#     print("\n Eliminando columnas de saldo_inventory SA...")
-    saldo_inventory = saldo_inventory[[
-        'idcentro', 'idbodega', 'idingreso', 'itemno', 'idstatus', 'idmodelo', 'idcoldis',
-        'fecha', 'idcontacto', 'retnum', 'idubica', 'pesokgs', 'equipo', 'inicial', 'salidas', 'idubica1',
-        'idproducto']]
-#     print("Columnas resultantes saldo_inventory SA...", saldo_inventory.columns)
+        #     print("\nEliminando columnas de wl_ingresos o Ingresos Status SA...")
+        wl_ingresos = wl_ingresos[['idcoclase', 'numero', 'itemcount', 'itemqty', 'fecha', 'idcontacto',
+                                   'descrip', 'idcostatus', 'retnum', 'equipo']]
+        #     print("Columnas resultantes wl_ingresos SA...", wl_ingresos.columns)
 
-#     print("\nEliminando columnas de registro_salidas SA...")
-    registro_salidas = registro_salidas[['trannum', 'lineano', 'fecha', 'cantidad', 'idmodelo', 'idcoldis',
-                                         'idingreso', 'itemno', 'idcontacto', 'equipo', 'idcentro', 'idcentro1',
-                                         'idclase', 'numero']]
-#     print("Columnas resultantes registro_salidas SA...", registro_salidas.columns)
+        #     print("\nEliminando columnas de inmovih_table SA...")
+        inmovih_table = inmovih_table[['idbodega', 'idclase', 'numero', 'fecha', 'idcontacto', 'referencia',
+                                       'transtatus', 'descrip', 'trannum', 'linead', 'lineac',
+                                       'idcliente', 'equipo', 'idcentro', 'idcentro1']]
 
-#     print("\nEliminando columnas de registro_ingresos SA...")
-    registro_ingresos = registro_ingresos[['idingreso', 'fecha', 'items', 'transtatus', 'descrip', 'available',
-                                           'equipo', 'idcontacto', 'retnum']]
-#     print("Columnas resultantes registro_ingresos SA...", registro_ingresos.columns)
+        inventario_sin_filtro = inventario_sin_filtro[[
+            'idcentro', 'idbodega', 'idingreso', 'itemno', 'idstatus', 'idmodelo', 'idcoldis',
+            'fecha', 'modifica', 'ingresa', 'idcontacto', 'retnum', 'idubica', 'pesokgs', 'equipo', 'inicial',
+            'salidas',
+            'idubica1',
+            'idproducto', 'idpedido']]
 
-#     print("\nEliminando columnas de wl_ingresos o Ingresos Status SA...")
-    wl_ingresos = wl_ingresos[['idcoclase', 'numero', 'itemcount', 'itemqty', 'fecha', 'idcontacto',
-                               'descrip', 'idcostatus', 'retnum', 'equipo']]
-#     print("Columnas resultantes wl_ingresos SA...", wl_ingresos.columns)
+        #     print("\nEliminando columnas de supplier_info SA...")
+        supplier_info = supplier_info[['idcontacto', 'descrip']]
 
-#     print("\nEliminando columnas de inmovih_table SA...")
-    inmovih_table = inmovih_table[['idbodega', 'idclase', 'numero', 'fecha', 'idcontacto', 'referencia',
-                                   'transtatus', 'descrip', 'trannum', 'linead', 'lineac',
-                                   'idcliente', 'equipo', 'idcentro', 'idcentro1']]
-#     print("Columnas resultantes inmovih_table SA...", inmovih_table.columns)
+        #     print("\nEliminando columnas de ctcentro SA...")
+        ctcentro_table = ctcentro_table[['idcentro', 'descrip']]
 
-    inventario_sin_filtro = inventario_sin_filtro[[
-        'idcentro', 'idbodega', 'idingreso', 'itemno', 'idstatus', 'idmodelo', 'idcoldis',
-        'fecha', 'modifica', 'ingresa', 'idcontacto', 'retnum', 'idubica', 'pesokgs', 'equipo', 'inicial', 'salidas',
-        'idubica1',
-        'idproducto', 'idpedido']]
-#     print("Columnas resultantes saldo_inventory SA...", inventario_sin_filtro.columns)
+        #     print("\nEliminando columnas de productos_modelo SA...")
+        producto_modelos = producto_modelos.loc[:, ['idmodelo', 'descrip']]
 
-#     print("\nEliminando columnas de supplier_info SA...")
-    supplier_info = supplier_info[['idcontacto', 'descrip']]
-#     print("Columnas resultantes supplier_info SA...", supplier_info.columns)
+        # Step 1: Cleaning and removing unnecessary columns
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-#     print("\nEliminando columnas de ctcentro SA...")
-    ctcentro_table = ctcentro_table[['idcentro', 'descrip']]
-#     print("Columnas resultantes ctcentro_table SA...", ctcentro_table.columns)
+        saldo_inventory = saldo_inventory[saldo_inventory['idstatus'] == '01']
 
-#     print("\nEliminando columnas de productos_modelo SA...")
-    producto_modelos = producto_modelos.loc[:, ['idmodelo', 'descrip']]
-#     print("Columnas resultantes productos_modelo SA...", producto_modelos.columns)
+        # # Delete rows with idubica == DESPAC & TIENDA / saldo_inventory
+        # print("Eliminando filas 'DESPAC', 'TIENDA' de saldo_inventory SA...")
+        # saldo_inventory = saldo_inventory[~saldo_inventory['idubica'].isin(['DESPAC', 'TIENDA'])]
+        # print("\nSALDO INVENTORY DESPUES DE ELIMINAR XX, 3 idubica = TIENDA/DESPAC: \n ", saldo_inventory.head(10))
 
-    # Limpiando Saldo/Inventario de la tabla saldo_inventory ***
-    # print("\nSALDO INVENTORY ANTES DE ELIMINAR XX, 3: \n", saldo_inventory.head(10))
+        # Delete rows with estatus == 9 (anuladas) and estatus == 5 (entregadas) / rpshd_despachos
+        #     print("\n Eliminando filas 'anuladas' y 'entregadas' de rpshd_despachos SA...")
+        pedidos_anulados = rpshd_despachos[rpshd_despachos['estatus'] == '9'].index
+        pedidos_entregados = rpshd_despachos[rpshd_despachos['estatus'] == '5'].index
+        rpshd_despachos = rpshd_despachos.drop(pedidos_anulados)
+        rpshd_despachos = rpshd_despachos.drop(pedidos_entregados)
 
-    # Delete rows with idstatus == XX and '3' / saldo_inventory
-#     print("Eliminando filas 'XX', '3' de saldo_inventory SA...")
-    # inventory_rows_delete = saldo_inventory[~saldo_inventory['idstatus'].isin(['XX', '03'])].index
-    # saldo_inventory = saldo_inventory.drop(inventory_rows_delete)
+        # Filtrar tablas de registro_salidas e inmovih_table para que muestre únicamente los despachos (TR01)
+        #     print("\n Filtrando únicamente los despachos TR01 en SA...")
+        registro_salidas = registro_salidas.loc[registro_salidas['idclase'] == 'TR01']
+        inmovih_table = inmovih_table.loc[inmovih_table['idclase'] == 'TR01']
 
-    saldo_inventory = saldo_inventory[saldo_inventory['idstatus'] == '01']
+        # Filtrar Dispatched Inventory, status == 3
+        #     print("Preparando el Dispatched Inventory SA...")
+        dispatched_inventory_rows_delete = dispatched_inventory[
+            ~dispatched_inventory['idstatus'].isin(['XX', '03'])].index
+        dispatched_inventory = dispatched_inventory.drop(dispatched_inventory_rows_delete)
 
-    # # Delete rows with idubica == DESPAC & TIENDA / saldo_inventory
-    # print("Eliminando filas 'DESPAC', 'TIENDA' de saldo_inventory SA...")
-    # saldo_inventory = saldo_inventory[~saldo_inventory['idubica'].isin(['DESPAC', 'TIENDA'])]
-    # print("\nSALDO INVENTORY DESPUES DE ELIMINAR XX, 3 idubica = TIENDA/DESPAC: \n ", saldo_inventory.head(10))
+        # Step 2: Filtering out data
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    # Delete rows with estatus == 9 (anuladas) and estatus == 5 (entregadas) / rpshd_despachos
-#     print("\n Eliminando filas 'anuladas' y 'entregadas' de rpshd_despachos SA...")
-    pedidos_anulados = rpshd_despachos[rpshd_despachos['estatus'] == '9'].index
-    pedidos_entregados = rpshd_despachos[rpshd_despachos['estatus'] == '5'].index
-    rpshd_despachos = rpshd_despachos.drop(pedidos_anulados)
-    rpshd_despachos = rpshd_despachos.drop(pedidos_entregados)
+        # Eliminar ubicaciones de depósito temporal que ya no existen en la actualidad.
+        dispatched_inventory_locations_delete = dispatched_inventory[dispatched_inventory['idubica'].isin(
+            ['DT1H2', 'DT1I3', 'DT1J3', 'DT2C2', 'DT2G3', 'DT2H1', 'DT3D1', 'DT3E1', 'DT3E1', 'DT3E2', 'DT3I1'])].index
+        dispatched_inventory = dispatched_inventory.drop(dispatched_inventory_locations_delete)
+        inventario_sin_filtro = inventario_sin_filtro.drop(dispatched_inventory_locations_delete)
 
-    # Filtrar tablas de registro_salidas e inmovih_table para que muestre únicamente los despachos (TR01)
-#     print("\n Filtrando únicamente los despachos TR01 en SA...")
-    registro_salidas = registro_salidas.loc[registro_salidas['idclase'] == 'TR01']
-    inmovih_table = inmovih_table.loc[inmovih_table['idclase'] == 'TR01']
+        # Eliminar clientes prueba
+        ids_to_remove = ['000099', 'AC0001']
+        supplier_info = supplier_info[~supplier_info['idcontacto'].isin(ids_to_remove)]
 
-    # Filtrar Dispatched Inventory, status == 3
-#     print("Preparando el Dispatched Inventory SA...")
-    dispatched_inventory_rows_delete = dispatched_inventory[~dispatched_inventory['idstatus'].isin(['XX', '03'])].index
-    dispatched_inventory = dispatched_inventory.drop(dispatched_inventory_rows_delete)
+        ids_to_remove_ct = ['002']
+        ctcentro_table = ctcentro_table[~ctcentro_table['idcentro'].isin(ids_to_remove_ct)]
 
-    # Eliminar ubicaciones de depósito temporal que ya no existen en la actualidad.
-    dispatched_inventory_locations_delete = dispatched_inventory[dispatched_inventory['idubica'].isin(
-        ['DT1H2', 'DT1I3', 'DT1J3', 'DT2C2', 'DT2G3', 'DT2H1', 'DT3D1', 'DT3E1', 'DT3E1', 'DT3E2', 'DT3I1'])].index
-    dispatched_inventory = dispatched_inventory.drop(dispatched_inventory_locations_delete)
-    inventario_sin_filtro = inventario_sin_filtro.drop(dispatched_inventory_locations_delete)
+        # Step 3: Filtering out unnecessary locations
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    # Eliminar clientes prueba
-    ids_to_remove = ['000099', 'AC0001']
-    supplier_info = supplier_info[~supplier_info['idcontacto'].isin(ids_to_remove)]
+        # Aplicar la función de corrección a las columnas relevantes
+        #     print("\n***Aplicando la función de corrección de columnas.***")
 
-    ids_to_remove_ct = ['002']
-    ctcentro_table = ctcentro_table[~ctcentro_table['idcentro'].isin(ids_to_remove_ct)]
+        saldo_inventory.loc[:, 'fecha'] = pd.to_datetime(saldo_inventory['fecha'], errors='coerce')
+        dispatched_inventory.loc[:, 'fecha'] = pd.to_datetime(dispatched_inventory['fecha'], errors='coerce')
+        registro_salidas.loc[:, 'fecha'] = pd.to_datetime(registro_salidas['fecha'], errors='coerce')
+        registro_ingresos.loc[:, 'fecha'] = pd.to_datetime(registro_ingresos['fecha'], errors='coerce')
+        wl_ingresos.loc[:, 'fecha'] = pd.to_datetime(wl_ingresos['fecha'], errors='coerce')
+        inmovih_table.loc[:, 'fecha'] = pd.to_datetime(inmovih_table['fecha'], errors='coerce')
+        rpshd_despachos.loc[:, 'fecha'] = pd.to_datetime(rpshd_despachos['fecha'], errors='coerce')
 
-    # Aplicar la función de corrección a las columnas relevantes
-#     print("\n***Aplicando la función de corrección a las columnas relevantes.***")
+        # Step 4: Correcting data
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    saldo_inventory.loc[:, 'fecha'] = pd.to_datetime(saldo_inventory['fecha'], errors='coerce')
-    dispatched_inventory.loc[:, 'fecha'] = pd.to_datetime(dispatched_inventory['fecha'], errors='coerce')
-    registro_salidas.loc[:, 'fecha'] = pd.to_datetime(registro_salidas['fecha'], errors='coerce')
-    registro_ingresos.loc[:, 'fecha'] = pd.to_datetime(registro_ingresos['fecha'], errors='coerce')
-    wl_ingresos.loc[:, 'fecha'] = pd.to_datetime(wl_ingresos['fecha'], errors='coerce')
-    inmovih_table.loc[:, 'fecha'] = pd.to_datetime(inmovih_table['fecha'], errors='coerce')
-    rpshd_despachos.loc[:, 'fecha'] = pd.to_datetime(rpshd_despachos['fecha'], errors='coerce')
+        def safe_strftime(df, col):
+            if df[col].dtype == 'datetime64[ns]':  # Check if column is datetime
+                df[col] = df[col].dt.strftime('%Y-%m-%d').fillna('')  # Convert to string and fill NaT
+            else:
+                print(f"Warning: '{col}' column contains non-datetime values")
 
-    def safe_strftime(df, col):
-        if df[col].dtype == 'datetime64[ns]':  # Check if column is datetime
-            df[col] = df[col].dt.strftime('%Y-%m-%d').fillna('')  # Convert to string and fill NaT
-        else:
-            print(f"Warning: '{col}' column contains non-datetime values")
+        # Apply the safe conversion to all relevant DataFrames
+        safe_strftime(saldo_inventory, 'fecha')
+        safe_strftime(dispatched_inventory, 'fecha')
+        safe_strftime(registro_salidas, 'fecha')
+        safe_strftime(registro_ingresos, 'fecha')
+        safe_strftime(wl_ingresos, 'fecha')
+        safe_strftime(inmovih_table, 'fecha')
+        safe_strftime(rpshd_despachos, 'fecha')
 
-    # Apply the safe conversion to all relevant DataFrames
-    safe_strftime(saldo_inventory, 'fecha')
-    safe_strftime(dispatched_inventory, 'fecha')
-    safe_strftime(registro_salidas, 'fecha')
-    safe_strftime(registro_ingresos, 'fecha')
-    safe_strftime(wl_ingresos, 'fecha')
-    safe_strftime(inmovih_table, 'fecha')
-    safe_strftime(rpshd_despachos, 'fecha')
+        # print("***Aplicación finalizada. Las fechas han sido normalizadas.\n***")
 
-    # print("***Aplicación finalizada. Las fechas han sido normalizadas.\n***")
+        # Ordenando las fechas de más recientes a más antiguas
+        saldo_inventory = saldo_inventory.sort_values(by='fecha', ascending=False)
+        dispatched_inventory = dispatched_inventory.sort_values(by='fecha', ascending=False)
+        registro_salidas = registro_salidas.sort_values(by='fecha', ascending=False)
+        registro_ingresos = registro_ingresos.sort_values(by='fecha', ascending=False)
+        wl_ingresos = wl_ingresos.sort_values(by='fecha', ascending=False)
+        inmovih_table = inmovih_table.sort_values(by='fecha', ascending=False)
+        rpshd_despachos = rpshd_despachos.sort_values(by='fecha', ascending=False)
 
-    # Ordenando las fechas de más recientes a más antiguas
-    saldo_inventory = saldo_inventory.sort_values(by='fecha', ascending=False)
-    dispatched_inventory = dispatched_inventory.sort_values(by='fecha', ascending=False)
-    registro_salidas = registro_salidas.sort_values(by='fecha', ascending=False)
-    registro_ingresos = registro_ingresos.sort_values(by='fecha', ascending=False)
-    wl_ingresos = wl_ingresos.sort_values(by='fecha', ascending=False)
-    inmovih_table = inmovih_table.sort_values(by='fecha', ascending=False)
-    rpshd_despachos = rpshd_despachos.sort_values(by='fecha', ascending=False)
+        # Step 5: Sorting and preparing data
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    print("***Las fechas han sido ordenadas de más recientes a más antiguas.\n***")
+        # print("***Las fechas han sido ordenadas de más recientes a más antiguas.\n***")
 
-    # # Printing new data result after dropping off
-    # print("\n SAN ANDRES | DATAFRAMES ACTUALIZADOS: \n")
-    # print("\n Ingresos Status SA:\n ", wl_ingresos.head(50))
-    # print("\n Despachos Status SA: \n ", rpshd_despachos.head(50))
-    # print("\n Despachos-Productos Status SA:\n ", rpsdt_productos.head(50))
-    # print("\n Registro Ingresos SA: \n", registro_ingresos.head(50))
-    # print("\n Registro Salidas SA:\n ", registro_salidas.head(50))
-    # print("\n Tabla inmovih SA: \n", inmovih_table.head(50))
-    # print("\n Saldo/Inventario SA: \n ", saldo_inventory.head(50))
-    # print("\n Contactos SA: \n ", supplier_info.head(50))
-    # print("\n CTCENTRO table SA: \n", ctcentro_table.head(50))
-    # print("\n Dispatched_inventory  SA: \n", dispatched_inventory.head(50))
+        # # Printing new data result after dropping off
+        # print("\n SAN ANDRES | DATAFRAMES ACTUALIZADOS: \n")
+        # print("\n Ingresos Status SA:\n ", wl_ingresos.head(50))
+        # print("\n Despachos Status SA: \n ", rpshd_despachos.head(50))
+        # print("\n Despachos-Productos Status SA:\n ", rpsdt_productos.head(50))
+        # print("\n Registro Ingresos SA: \n", registro_ingresos.head(50))
+        # print("\n Registro Salidas SA:\n ", registro_salidas.head(50))
+        # print("\n Tabla inmovih SA: \n", inmovih_table.head(50))
+        # print("\n Saldo/Inventario SA: \n ", saldo_inventory.head(50))
+        # print("\n Contactos SA: \n ", supplier_info.head(50))
+        # print("\n CTCENTRO table SA: \n", ctcentro_table.head(50))
+        # print("\n Dispatched_inventory  SA: \n", dispatched_inventory.head(50))
 
-    saldo_inventory_cnan = ['idcentro', 'idbodega', 'idingreso', 'itemno', 'idstatus', 'idmodelo',
-                            'idcoldis', 'fecha', 'idcontacto', 'retnum', 'idubica', 'pesokgs',
-                            'equipo', 'inicial', 'salidas', 'idubica1', 'idproducto']
+        saldo_inventory_cnan = ['idcentro', 'idbodega', 'idingreso', 'itemno', 'idstatus', 'idmodelo',
+                                'idcoldis', 'fecha', 'idcontacto', 'retnum', 'idubica', 'pesokgs',
+                                'equipo', 'inicial', 'salidas', 'idubica1', 'idproducto']
 
-    saldo_inventory.loc[:, saldo_inventory_cnan] = saldo_inventory.loc[:, saldo_inventory_cnan].fillna("")
-    saldo_inventory.loc[:, 'idubica'] = saldo_inventory.loc[:, 'idubica'].fillna("Ubicación Desconocida")
-    saldo_inventory.loc[:, 'idubica1'] = saldo_inventory.loc[:, 'idubica1'].fillna("Tarima Desconocida")
+        saldo_inventory.loc[:, saldo_inventory_cnan] = saldo_inventory.loc[:, saldo_inventory_cnan].fillna("")
+        saldo_inventory.loc[:, 'idubica'] = saldo_inventory.loc[:, 'idubica'].fillna("Ubicación Desconocida")
+        saldo_inventory.loc[:, 'idubica1'] = saldo_inventory.loc[:, 'idubica1'].fillna("Tarima Desconocida")
 
-    inventario_sin_filtro.loc[:, saldo_inventory_cnan] = inventario_sin_filtro.loc[:, saldo_inventory_cnan].fillna("")
-    inventario_sin_filtro.loc[:, 'idubica'] = inventario_sin_filtro.loc[:, 'idubica'].fillna("Ubicación Desconocida")
-    inventario_sin_filtro.loc[:, 'idubica1'] = inventario_sin_filtro.loc[:, 'idubica1'].fillna("Tarima Desconocida")
+        inventario_sin_filtro.loc[:, saldo_inventory_cnan] = inventario_sin_filtro.loc[:, saldo_inventory_cnan].fillna(
+            "")
+        inventario_sin_filtro.loc[:, 'idubica'] = inventario_sin_filtro.loc[:, 'idubica'].fillna(
+            "Ubicación Desconocida")
+        inventario_sin_filtro.loc[:, 'idubica1'] = inventario_sin_filtro.loc[:, 'idubica1'].fillna("Tarima Desconocida")
 
-    rpsdt_productos_cnan = ['numero', 'itemline', 'estatus', 'idproducto', 'idcontacto', 'idmodelo', 'idcoldis',
-                            'cantidad',
-                            'idubica'
-                            ]
-    rpsdt_productos.loc[:, rpsdt_productos_cnan] = rpsdt_productos[rpsdt_productos_cnan].fillna("")
+        rpsdt_productos_cnan = ['numero', 'itemline', 'estatus', 'idproducto', 'idcontacto', 'idmodelo', 'idcoldis',
+                                'cantidad',
+                                'idubica'
+                                ]
+        rpsdt_productos.loc[:, rpsdt_productos_cnan] = rpsdt_productos[rpsdt_productos_cnan].fillna("")
 
-    rpsdt_productos['idubica1'] = rpsdt_productos['idubica1'].apply(
-        lambda x: "DESCONOCIDO" if pd.isna(x) or str(x).strip() == "" else x)
-    rpsdt_productos['idubica'] = rpsdt_productos['idubica'].apply(
-        lambda x: "DESCONOCIDO" if pd.isna(x) or str(x).strip() == "" else x)
+        rpsdt_productos['idubica1'] = rpsdt_productos['idubica1'].apply(
+            lambda x: "DESCONOCIDO" if pd.isna(x) or str(x).strip() == "" else x)
+        rpsdt_productos['idubica'] = rpsdt_productos['idubica'].apply(
+            lambda x: "DESCONOCIDO" if pd.isna(x) or str(x).strip() == "" else x)
 
-
+        # Step 6: Filling NaNs
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
+    print("Data Processing completed successfully.\n")
     return (wl_ingresos, rpshd_despachos, rpsdt_productos, registro_ingresos, registro_salidas,
             inmovih_table, saldo_inventory, supplier_info, ctcentro_table, producto_modelos, dispatched_inventory,
             inventario_sin_filtro)
@@ -655,154 +690,189 @@ def data_processing(wl_ingresos, rpshd_despachos, rpsdt_productos, registro_ingr
 
 def data_screening(saldo_inventory, registro_ingresos, registro_salidas, rpsdt_productos, rpshd_despachos,
                    wl_ingresos, inmovih_table, dispatched_inventory):
-    # INGRESOS -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    # INGRESOS ---------------------------------------------------------------------------------------------------------
 
     # Función para asignar bodega de acuerdo al idubica
-    def asignar_ubicacion(idubica):
+    with Progress() as progress:
+        # Add a new task
+        task = progress.add_task("[green]Screening Data: ", total=14)
 
-        if idubica == 'P00000':
-            return 'PISO'
-        elif idubica.startswith('E'):
-            return 'BODE'
-        elif idubica in ['PE0000']:
-            return 'BODE'
-        elif idubica in ['C2PD', 'C2PE', 'C2PF', 'C2PG', 'C2PL', 'C1PA', 'C2PN',
-                         'C2PA', 'C2P0', 'C2PK', 'C2PJ', 'C2PI']:
-            return 'INTEMPERIE'
-        elif idubica.startswith('A'):
-            return 'BODA'
-        elif idubica in ['PA0000']:
-            return 'BODA'
-        elif idubica.startswith('C'):
-            return 'BODC'
-        elif idubica in ['PC0000']:
-            return 'BODC'
-        elif idubica.startswith('G'):
-            return 'BODG'
-        elif idubica in ['PG0000']:
-            return 'BODG'
-        elif idubica in [
-            'C1PA', 'C2PJ', 'C2PA', 'C2P0', 'C2PN', 'C2PO', 'C1PE', 'C1PF',
-            'C1PG', 'C1PL', 'C1PJ', 'C1PK', 'C1PI', 'C2PJ', 'C2PK', 'C2PI'
-        ]:
-            return 'BODJ'
-        elif idubica in ['PN0000']:
-            return 'BODJ'
-        elif idubica.startswith(('P', 'B', 'M', 'V')):
-            return 'BODJ'
-        else:
-            return 'DESCONOCIDO'
+        def asignar_ubicacion(idubica):
 
-    # saldo_inventory['idubica'] = saldo_inventory['idubica'].astype(str)
-    saldo_inventory['bodega'] = saldo_inventory['idubica'].apply(asignar_ubicacion)
+            if idubica == 'P00000':
+                return 'PISO'
+            elif idubica.startswith('E'):
+                return 'BODE'
+            elif idubica in ['PE0000']:
+                return 'BODE'
+            elif idubica in ['C2PD', 'C2PE', 'C2PF', 'C2PG', 'C2PL', 'C1PA', 'C2PN',
+                             'C2PA', 'C2P0', 'C2PK', 'C2PJ', 'C2PI']:
+                return 'INTEMPERIE'
+            elif idubica.startswith('A'):
+                return 'BODA'
+            elif idubica in ['PA0000']:
+                return 'BODA'
+            elif idubica.startswith('C'):
+                return 'BODC'
+            elif idubica in ['PC0000']:
+                return 'BODC'
+            elif idubica.startswith('G'):
+                return 'BODG'
+            elif idubica in ['PG0000']:
+                return 'BODG'
+            elif idubica in [
+                'C1PA', 'C2PJ', 'C2PA', 'C2P0', 'C2PN', 'C2PO', 'C1PE', 'C1PF',
+                'C1PG', 'C1PL', 'C1PJ', 'C1PK', 'C1PI', 'C2PJ', 'C2PK', 'C2PI'
+            ]:
+                return 'BODJ'
+            elif idubica in ['PN0000']:
+                return 'BODJ'
+            elif idubica.startswith(('P', 'B', 'M', 'V')):
+                return 'BODJ'
+            else:
+                return 'DESCONOCIDO'
 
-    # print("saldo_inventory filtrado: \n", saldo_inventory.head(25))
+        # Step: Defining object location
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    # Asignar y filtrar registro_ingresos... key = idingreso ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+        # saldo_inventory['idubica'] = saldo_inventory['idubica'].astype(str)
+        saldo_inventory['bodega'] = saldo_inventory['idubica'].apply(asignar_ubicacion)
 
-    # print("registro ingresos:\n", registro_ingresos)
-    registro_ingresos['idingreso'] = registro_ingresos['idingreso'].astype(str)
-    saldo_inventory['idingreso'] = saldo_inventory['idingreso'].astype(str)
-    saldo_inventory['bodega'] = saldo_inventory['bodega'].astype(str)
+        # Step: Locating objects
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    registro_ingresos = registro_ingresos.groupby('idingreso').agg({
-        'fecha': 'first',
-        'items': 'first',
-        'transtatus': 'first',
-        'descrip': 'first',
-        'idcontacto': 'first',
-        'retnum': 'first',
-        # 'bodega_x': 'first',
-    }).reset_index()
+        # Asignar y filtrar registro_ingresos... key = idingreso -------------------------------------------------------
 
-    registro_ingresos = pd.merge(registro_ingresos, saldo_inventory[['idingreso', 'idubica', 'bodega']],
-                                 on='idingreso', how='left')
+        # print("registro ingresos:\n", registro_ingresos)
+        registro_ingresos['idingreso'] = registro_ingresos['idingreso'].astype(str)
+        saldo_inventory['idingreso'] = saldo_inventory['idingreso'].astype(str)
+        saldo_inventory['bodega'] = saldo_inventory['bodega'].astype(str)
 
-    print("registro_ingresos filtrado: \n", registro_ingresos.head(25))
+        # Step: Preparing data
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    # Asignar y filtrar wl_ingresos (cohd)... key = retnum------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-#     print("wl ingresos:\n", wl_ingresos)
+        registro_ingresos = registro_ingresos.groupby('idingreso').agg({
+            'fecha': 'first',
+            'items': 'first',
+            'transtatus': 'first',
+            'descrip': 'first',
+            'idcontacto': 'first',
+            'retnum': 'first',
+            # 'bodega_x': 'first',
+        }).reset_index()
 
-    #  DESPACHOS -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+        # Step: Grouping data
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    # Tabla registro_salidas - Asignación de bodegas
+        registro_ingresos = pd.merge(registro_ingresos, saldo_inventory[['idingreso', 'idubica', 'bodega']],
+                                     on='idingreso', how='left')
 
-    # Crear la nueva columna 'bodega' en rpsdt_productos usando la función asignar_ubicación
-    rpsdt_productos['bodega'] = rpsdt_productos['idubica'].apply(asignar_ubicacion)
+        # Step: Merging data
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    # Agrupar 'rpsdt_productos' y obtener el primer valor de 'bodega' e 'idubica' por 'idingreso'
-    rpsdt_productos_agrupado_ingreso = rpsdt_productos.groupby('idingreso').agg({
-        'bodega': 'first',
-        'idubica': 'first'
-    }).reset_index()
+        # Tabla registro_salidas - Asignación de bodegas
 
-    # Convertir ambas columnas a str
-    registro_salidas['idingreso'] = registro_salidas['idingreso'].astype('str')
-    rpsdt_productos_agrupado_ingreso['idingreso'] = rpsdt_productos_agrupado_ingreso['idingreso'].astype('str')
+        # Crear la nueva columna 'bodega' en rpsdt_productos usando la función asignar_ubicación
+        rpsdt_productos['bodega'] = rpsdt_productos['idubica'].apply(asignar_ubicacion)
 
-    # # Guardar resultados en excel
-    # output_path = r'C:\Users\josemaria\Downloads\registro_salidas_antes.csv'
-    # registro_salidas.to_csv(output_path, index=True)
+        # Step: Defining object location
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    # Hacer el merge con 'registro_salidas'
-    registro_salidas = pd.merge(registro_salidas, rpsdt_productos_agrupado_ingreso, on='idingreso', how='left')
+        # Agrupar 'rpsdt_productos' y obtener el primer valor de 'bodega' e 'idubica' por 'idingreso'
+        rpsdt_productos_agrupado_ingreso = rpsdt_productos.groupby('idingreso').agg({
+            'bodega': 'first',
+            'idubica': 'first'
+        }).reset_index()
 
-    # # Guardar resultados en excel
-    # output_path = r'C:\Users\josemaria\Downloads\registro_salidas_post_merge.csv'
-    # registro_salidas.to_csv(output_path, index=True)
+        # Step: Grouping data
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    # Aplicar lambda para asingar DESCONOCIDO a idubica
-    registro_salidas['idubica'] = registro_salidas['idubica'].apply(
-        lambda x: "DESCONOCIDO" if pd.isna(x) or str(x).strip() == "" else x)
-    registro_salidas['bodega'] = registro_salidas['bodega'].apply(
-        lambda x: "DESCONOCIDO" if pd.isna(x) or str(x).strip() == "" else x)
-    # Aplicar lambda para asingar DESCONOCIDO a idubica
-    registro_ingresos['idubica'] = registro_ingresos['idubica'].apply(
-        lambda x: "DESCONOCIDO" if pd.isna(x) or str(x).strip() == "" else x)
-    registro_ingresos['bodega'] = registro_ingresos['bodega'].apply(
-        lambda x: "DESCONOCIDO" if pd.isna(x) or str(x).strip() == "" else x)
+        # Convertir ambas columnas a str
+        registro_salidas['idingreso'] = registro_salidas['idingreso'].astype('str')
+        rpsdt_productos_agrupado_ingreso['idingreso'] = rpsdt_productos_agrupado_ingreso['idingreso'].astype('str')
 
-    # # Guardar resultados en excel
-    # output_path = r'C:\Users\josemaria\Downloads\registro_salidas_lamda.csv'
-    # registro_salidas.to_csv(output_path, index=True)
+        # Step: Preparing data
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    # Renaming columns
-    registro_salidas.rename(columns={'bodega_x': 'bodega', 'idubica_x': 'idubica'}, inplace=True)
-    # Dropping columns
-    # registro_salidas.drop(columns=['bodega_y', 'idubica_y'], inplace=True)
+        # Hacer el merge con 'registro_salidas'
+        registro_salidas = pd.merge(registro_salidas, rpsdt_productos_agrupado_ingreso, on='idingreso', how='left')
 
-    inmovih_table.rename(columns={'bodega_x': 'bodega', 'idubica_x': 'idubica'}, inplace=True)
-    # Dropping columns
-    # inmovih_table.drop(columns=['bodega_y', 'idubica_y'], inplace=True)
+        # Step: Merging data
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    # Paso 3: Agrupar 'registro_salidas' por 'trannum' y obtener la primera 'bodega' e 'idubica'
-    registro_salidas_agrupado = registro_salidas.groupby('trannum').agg({
-        'bodega': 'first',
-        'idubica': 'first'
-    }).reset_index()
+        # # Guardar resultados en excel
+        # output_path = r'C:\Users\josemaria\Downloads\registro_salidas_post_merge.csv'
+        # registro_salidas.to_csv(output_path, index=True)
 
-    # print("Registro salidas agrupado merge:\n", registro_salidas_agrupado)
-    # print("inmovih antes del  merge:\n", inmovih_table)
+        # Aplicar lambda para asingar DESCONOCIDO a idubica
+        registro_salidas['idubica'] = registro_salidas['idubica'].apply(
+            lambda x: "DESCONOCIDO" if pd.isna(x) or str(x).strip() == "" else x)
+        registro_salidas['bodega'] = registro_salidas['bodega'].apply(
+            lambda x: "DESCONOCIDO" if pd.isna(x) or str(x).strip() == "" else x)
+        # Aplicar lambda para asingar DESCONOCIDO a idubica
+        registro_ingresos['idubica'] = registro_ingresos['idubica'].apply(
+            lambda x: "DESCONOCIDO" if pd.isna(x) or str(x).strip() == "" else x)
+        registro_ingresos['bodega'] = registro_ingresos['bodega'].apply(
+            lambda x: "DESCONOCIDO" if pd.isna(x) or str(x).strip() == "" else x)
 
-    # Merge con 'inmovih_table'
-    inmovih_table = pd.merge(inmovih_table, registro_salidas_agrupado, on='trannum', how='left')
+        # Step: Defining unknown locations
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    # Paso 5: Eliminar filas donde 'bodega' sea NaN en cada DataFrame
-    saldo_inventory = saldo_inventory.dropna(subset=['bodega'])
-    registro_ingresos = registro_ingresos.dropna(subset=['bodega'])
-    rpsdt_productos = rpsdt_productos.dropna(subset=['bodega'])
-    inmovih_table = inmovih_table.dropna(subset=['bodega'])
-    registro_salidas = registro_salidas.dropna(subset=['bodega'])
+        # Renaming columns
+        registro_salidas.rename(columns={'bodega_x': 'bodega', 'idubica_x': 'idubica'}, inplace=True)
 
-    # print('registro_salidas después de filtrar bodega: \n', registro_salidas.head(100))
-    # print('inmovih_table después de filtrar bodega: \n', inmovih_table.head(100))
-    # print('rpsdt_productos después de filtrar bodega: \n', rpsdt_productos.head(100))
+        inmovih_table.rename(columns={'bodega_x': 'bodega', 'idubica_x': 'idubica'}, inplace=True)
+
+        # Step: Merging data
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
+
+        # Paso 3: Agrupar 'registro_salidas' por 'trannum' y obtener la primera 'bodega' e 'idubica'
+        registro_salidas_agrupado = registro_salidas.groupby('trannum').agg({
+            'bodega': 'first',
+            'idubica': 'first'
+        }).reset_index()
+
+        # Step: Grouping data
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
+
+        # Merge con 'inmovih_table'
+        inmovih_table = pd.merge(inmovih_table, registro_salidas_agrupado, on='trannum', how='left')
+
+        # Step: Merging data
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
+
+        # Paso 5: Eliminar filas donde 'bodega' sea NaN en cada DataFrame
+        saldo_inventory = saldo_inventory.dropna(subset=['bodega'])
+        registro_ingresos = registro_ingresos.dropna(subset=['bodega'])
+        rpsdt_productos = rpsdt_productos.dropna(subset=['bodega'])
+        inmovih_table = inmovih_table.dropna(subset=['bodega'])
+        registro_salidas = registro_salidas.dropna(subset=['bodega'])
+
+        # Step: Cleaning data
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
+
+    print("Data Screening completed successfully.\n")
 
     # Guardar resultados en excel
     # output_path = r'C:\Users\josemaria\Downloads\registro_salidas_screening.csv'
     # registro_salidas.to_csv(output_path, index=True)
 
-    return saldo_inventory, registro_ingresos, registro_salidas, rpsdt_productos, rpshd_despachos, wl_ingresos, inmovih_table, dispatched_inventory
+    return (saldo_inventory, registro_ingresos, registro_salidas, rpsdt_productos, rpshd_despachos, wl_ingresos,
+            inmovih_table, dispatched_inventory)
 
 
 def insaldo_bode_comp(saldo_inventory):
@@ -834,13 +904,9 @@ def insaldo_bode_comp(saldo_inventory):
 
     # Step 2: Check for rows where 'inicial' is still NaN (i.e., no match found)
     missing_inicial = bode_merged[bode_merged['inicial'].isna()]
-    # print("Rows with missing 'inicial' after merge (Unmatched idmodelo):")
-    # print(missing_inicial[['idmodelo', 'bodega', 'inicial']])
 
     # Optionally, check if these unmatched idmodelo exist in models_clasificacion
     unmatched_idmodelos = missing_inicial['idmodelo'].unique()
-    # print("Unmatched idmodelo values:")
-    # print(unmatched_idmodelos)
 
     # Rename 'cubicaje' to 'inicial' in the merged DataFrame
     bode_merged['inicial'] = bode_merged['cubicaje']
@@ -857,10 +923,6 @@ def insaldo_bode_comp(saldo_inventory):
     default_cubicaje = 1.5  # this is just so we evade errors (NEW PRODUCTS MUST BE ASSIGNED CBM)
     saldo_inventory['inicial'] = saldo_inventory['inicial'].fillna(default_cubicaje)
 
-    # # Final integrated check to confirm the 'inicial' column has been updated correctly
-    # print("Final Integrated Saldo_inventory (BODE rows):")
-    # print(saldo_inventory[saldo_inventory['bodega'] == 'BODE'][['idmodelo', 'bodega', 'inicial']].head(10))
-
     output_path = os.path.join(get_base_output_path(), 'insaldo_bode_comp.csv')
     saldo_inventory.to_csv(output_path, index=True)
 
@@ -868,292 +930,407 @@ def insaldo_bode_comp(saldo_inventory):
 
 
 def monthly_receptions_summary(registro_ingresos, supplier_info, inventario_sin_filtro, rpsdt_productos):
-    # *** TABLA RESUMEN | INGRESOS  ***
-    print("\n*** Historic receptions summary ***\n")
+    with Progress() as progress:
+        # Add a new task
+        task = progress.add_task("[green]Analysing historic reception Data: ", total=19)
 
-    registro_ingresos['fecha'] = pd.to_datetime(registro_ingresos['fecha'], errors='coerce')
-    registro_ingresos['items'] = pd.to_numeric(registro_ingresos['items'], errors='coerce')
-    registro_ingresos['idcontacto'] = registro_ingresos['idcontacto'].astype(str)
-    registro_ingresos['idingreso'] = registro_ingresos['idingreso'].astype(str)
+        registro_ingresos['fecha'] = pd.to_datetime(registro_ingresos['fecha'], errors='coerce')
+        registro_ingresos['items'] = pd.to_numeric(registro_ingresos['items'], errors='coerce')
+        registro_ingresos['idcontacto'] = registro_ingresos['idcontacto'].astype(str)
+        registro_ingresos['idingreso'] = registro_ingresos['idingreso'].astype(str)
 
-    inventario_sin_filtro['fecha'] = pd.to_datetime(inventario_sin_filtro['fecha'], errors='coerce')
-    inventario_sin_filtro['modifica'] = pd.to_datetime(inventario_sin_filtro['modifica'], errors='coerce')
-    inventario_sin_filtro['ingresa'] = pd.to_datetime(inventario_sin_filtro['ingresa'], errors='coerce')
-    inventario_sin_filtro['inicial'] = pd.to_numeric(inventario_sin_filtro['inicial'], errors='coerce')
-    inventario_sin_filtro['salidas'] = pd.to_numeric(inventario_sin_filtro['salidas'], errors='coerce')
-    inventario_sin_filtro['idpedido'] = pd.to_numeric(inventario_sin_filtro['idpedido'], errors='coerce')
-    inventario_sin_filtro['pesokgs'] = pd.to_numeric(inventario_sin_filtro['pesokgs'], errors='coerce')
-    inventario_sin_filtro['idcontacto'] = inventario_sin_filtro['idcontacto'].astype(str)
-    inventario_sin_filtro['idingreso'] = inventario_sin_filtro['idingreso'].astype(str)
+        inventario_sin_filtro['fecha'] = pd.to_datetime(inventario_sin_filtro['fecha'], errors='coerce')
+        inventario_sin_filtro['modifica'] = pd.to_datetime(inventario_sin_filtro['modifica'], errors='coerce')
+        inventario_sin_filtro['ingresa'] = pd.to_datetime(inventario_sin_filtro['ingresa'], errors='coerce')
+        inventario_sin_filtro['inicial'] = pd.to_numeric(inventario_sin_filtro['inicial'], errors='coerce')
+        inventario_sin_filtro['salidas'] = pd.to_numeric(inventario_sin_filtro['salidas'], errors='coerce')
+        inventario_sin_filtro['idpedido'] = pd.to_numeric(inventario_sin_filtro['idpedido'], errors='coerce')
+        inventario_sin_filtro['pesokgs'] = pd.to_numeric(inventario_sin_filtro['pesokgs'], errors='coerce')
+        inventario_sin_filtro['idcontacto'] = inventario_sin_filtro['idcontacto'].astype(str)
+        inventario_sin_filtro['idingreso'] = inventario_sin_filtro['idingreso'].astype(str)
 
-    monthly_registro_ingresos = registro_ingresos
-    monthly_inventario_sin_filtro = inventario_sin_filtro
+        # Step: Preparing data
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    # Check if 'modifica' month is greater than 'fecha' month and 'inicial' is 0
-    monthly_inventario_sin_filtro.loc[:, 'ddma'] = np.where(
-        (monthly_inventario_sin_filtro['modifica'].dt.month >= monthly_inventario_sin_filtro['fecha'].dt.month) &
-        (monthly_inventario_sin_filtro['inicial'] == 0) &
-        (monthly_inventario_sin_filtro['salidas'] == 0) &
-        (monthly_inventario_sin_filtro['pesokgs'] == 0),
-        monthly_inventario_sin_filtro['idpedido'],  # Assign 'idpedido' if both conditions are True
-        np.nan  # Otherwise, assign NaN
-    )
+        monthly_registro_ingresos = registro_ingresos
+        monthly_inventario_sin_filtro = inventario_sin_filtro
 
+        # Check if 'modifica' month is greater than 'fecha' month and 'inicial' is 0
+        monthly_inventario_sin_filtro.loc[:, 'ddma'] = np.where(
+            (monthly_inventario_sin_filtro['modifica'].dt.month >= monthly_inventario_sin_filtro['fecha'].dt.month) &
+            (monthly_inventario_sin_filtro['inicial'] == 0) &
+            (monthly_inventario_sin_filtro['salidas'] == 0) &
+            (monthly_inventario_sin_filtro['pesokgs'] == 0),
+            monthly_inventario_sin_filtro['idpedido'],  # Assign 'idpedido' if both conditions are True
+            np.nan  # Otherwise, assign NaN
+        )
 
-    output_path = os.path.join(get_base_output_path(), 'monthly_inventario_sin_filtro.csv')
-    monthly_inventario_sin_filtro.to_csv(output_path, index=True)
+        # Step: Defining partial product shipment
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    monthly_inventario_sin_filtro.loc[:, 'ddma'] = pd.to_numeric(monthly_inventario_sin_filtro['ddma'], errors='coerce')
+        monthly_inventario_sin_filtro.loc[:, 'ddma'] = pd.to_numeric(monthly_inventario_sin_filtro['ddma'],
+                                                                     errors='coerce')
 
-    # Convert 'idcontacto' in both DataFrames to strings
-    monthly_registro_ingresos.loc[:, 'idcontacto'] = monthly_registro_ingresos['idcontacto'].astype(str).str.strip()
-    monthly_inventario_sin_filtro.loc[:, 'idcontacto'] = monthly_inventario_sin_filtro['idcontacto'].astype(
-        str).str.strip()
-    supplier_info['idcontacto'] = supplier_info['idcontacto'].astype(str).str.strip()
+        # Convert 'idcontacto' in both DataFrames to strings
+        monthly_registro_ingresos.loc[:, 'idcontacto'] = monthly_registro_ingresos['idcontacto'].astype(str).str.strip()
+        monthly_inventario_sin_filtro.loc[:, 'idcontacto'] = monthly_inventario_sin_filtro['idcontacto'].astype(
+            str).str.strip()
+        supplier_info['idcontacto'] = supplier_info['idcontacto'].astype(str).str.strip()
 
-    # Determine the maximum length of 'idcontacto' values in both DataFrames
-    max_length = max(monthly_registro_ingresos['idcontacto'].str.len().max(),
-                     supplier_info['idcontacto'].str.len().max())
+        # Step: Preparing data
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    # Pad 'idcontacto' values with leading zeros to match the maximum length
-    monthly_registro_ingresos.loc[:, 'idcontacto'] = monthly_registro_ingresos['idcontacto'].str.zfill(max_length)
-    monthly_inventario_sin_filtro.loc[:, 'idcontacto'] = monthly_inventario_sin_filtro['idcontacto'].str.zfill(
-        max_length)
-    supplier_info['idcontacto'] = supplier_info['idcontacto'].str.zfill(max_length)
+        # Determine the maximum length of 'idcontacto' values in both DataFrames
+        max_length = max(monthly_registro_ingresos['idcontacto'].str.len().max(),
+                         supplier_info['idcontacto'].str.len().max())
 
-    # Ordenar las filas filtradas de más recientes a más antiguas
-    monthly_registro_ingresos = monthly_registro_ingresos.sort_values(by='fecha', ascending=False)
-    monthly_inventario_sin_filtro = monthly_inventario_sin_filtro.sort_values(by='fecha', ascending=False)
+        # Pad 'idcontacto' values with leading zeros to match the maximum length
+        monthly_registro_ingresos.loc[:, 'idcontacto'] = monthly_registro_ingresos['idcontacto'].str.zfill(max_length)
+        monthly_inventario_sin_filtro.loc[:, 'idcontacto'] = monthly_inventario_sin_filtro['idcontacto'].str.zfill(
+            max_length)
+        supplier_info['idcontacto'] = supplier_info['idcontacto'].str.zfill(max_length)
 
-    # Merge the DataFrames
-    merged_ingresos_inventario = pd.merge(monthly_registro_ingresos, monthly_inventario_sin_filtro, on='idingreso',
-                                          how='left')
+        # Step: Preparing keys
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-#     print("Ingresos mensuales por idcliente y bodega (detalle):\n", merged_ingresos_inventario)
+        # Ordenar las filas filtradas de más recientes a más antiguas
+        monthly_registro_ingresos = monthly_registro_ingresos.sort_values(by='fecha', ascending=False)
+        monthly_inventario_sin_filtro = monthly_inventario_sin_filtro.sort_values(by='fecha', ascending=False)
 
-    merged_ingresos_inventario['dup_key'] = (merged_ingresos_inventario['idingreso'] +
-                                             merged_ingresos_inventario['itemno'])
+        # Step: Sorting values
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    # Drop duplicates based on 'idingreso'
-    merged_ingresos_inventario = merged_ingresos_inventario.drop_duplicates(subset='dup_key', keep='first')
+        # Merge the DataFrames
+        merged_ingresos_inventario = pd.merge(monthly_registro_ingresos, monthly_inventario_sin_filtro, on='idingreso',
+                                              how='left')
 
-    # Create a filtered DataFrame excluding 'DESCONOCIDO'
-    filtered_bodegas = merged_ingresos_inventario[merged_ingresos_inventario['bodega'] != 'DESCONOCIDO']
+        # Step: Merging data
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    # Find replacement bodega for each idcontacto_x where there is exactly one unique bodega
-    replacement_bodega = filtered_bodegas.groupby('idcontacto_x').filter(lambda x: len(x['bodega'].unique()) == 1)
-    replacement_bodega = replacement_bodega.groupby('idcontacto_x')['bodega'].first()
+        merged_ingresos_inventario['dup_key'] = (merged_ingresos_inventario['idingreso'] +
+                                                 merged_ingresos_inventario['itemno'])
 
-    # Create mask for rows where bodega is 'DESCONOCIDO' and valid replacement exists
-    mask = (merged_ingresos_inventario['bodega'] == 'DESCONOCIDO') & merged_ingresos_inventario['idcontacto_x'].isin(
-        replacement_bodega.index)
+        # Drop duplicates based on 'idingreso'
+        merged_ingresos_inventario = merged_ingresos_inventario.drop_duplicates(subset='dup_key', keep='first')
 
-    # Apply the replacement
-    merged_ingresos_inventario.loc[mask, 'bodega'] = merged_ingresos_inventario.loc[mask, 'idcontacto_x'].map(
-        replacement_bodega)
+        # Step: Droping duplicated data
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    merged_ingresos_inventario = merged_ingresos_inventario[[
-        'idingreso', 'itemno', 'fecha_x', 'descrip', 'idcontacto_x', 'bodega', 'idubica_y', 'idubica_x', 'idmodelo',
-        'idcoldis', 'pesokgs', 'inicial',
-        'salidas', 'ddma', 'retnum_x','modifica']]
+        # Create a filtered DataFrame excluding 'DESCONOCIDO'
+        filtered_bodegas = merged_ingresos_inventario[merged_ingresos_inventario['bodega'] != 'DESCONOCIDO']
 
-    merged_ingresos_inventario['idcontacto_x'] = merged_ingresos_inventario.rename(
-        columns={'idcontacto_x': 'idcontacto'}, inplace=True)
+        # Find replacement bodega for each idcontacto_x where there is exactly one unique bodega
+        replacement_bodega = filtered_bodegas.groupby('idcontacto_x').filter(lambda x: len(x['bodega'].unique()) == 1)
+        replacement_bodega = replacement_bodega.groupby('idcontacto_x')['bodega'].first()
 
-    resumen_mensual_ingresos_sd = pd.merge(
-        merged_ingresos_inventario, rpsdt_productos[['bodega', 'idubica', 'idingreso']], on='idingreso', how='left')
+        # Create mask for rows where bodega is 'DESCONOCIDO' and valid replacement exists
+        mask = (merged_ingresos_inventario['bodega'] == 'DESCONOCIDO') & merged_ingresos_inventario[
+            'idcontacto_x'].isin(
+            replacement_bodega.index)
 
-    resumen_mensual_ingresos_sd['dup_key'] = (resumen_mensual_ingresos_sd['idingreso'] +
-                                              resumen_mensual_ingresos_sd['itemno'])
+        # Apply the replacement
+        merged_ingresos_inventario.loc[mask, 'bodega'] = merged_ingresos_inventario.loc[mask, 'idcontacto_x'].map(
+            replacement_bodega)
 
-    resumen_mensual_ingresos_sd = resumen_mensual_ingresos_sd.drop_duplicates(subset='dup_key', keep='first')
+        # Step: Replacing unknown data
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    resumen_mensual_ingresos_sd['bodega_x'] = resumen_mensual_ingresos_sd['bodega_x'].str.strip().str.upper()
-    resumen_mensual_ingresos_sd['bodega_y'] = resumen_mensual_ingresos_sd['bodega_y'].str.strip().str.upper()
+        merged_ingresos_inventario = merged_ingresos_inventario[[
+            'idingreso', 'itemno', 'fecha_x', 'descrip', 'idcontacto_x', 'bodega', 'idubica_y', 'idubica_x', 'idmodelo',
+            'idcoldis', 'pesokgs', 'inicial',
+            'salidas', 'ddma', 'retnum_x', 'modifica']]
 
-    # Apply the function to your dataframe to create a unified Bodega column
-    resumen_mensual_ingresos_sd['Bodega'] = resumen_mensual_ingresos_sd.apply(resolve_bodega, axis=1)
+        merged_ingresos_inventario['idcontacto_x'] = merged_ingresos_inventario.rename(
+            columns={'idcontacto_x': 'idcontacto'}, inplace=True)
 
-    resumen_mensual_ingresos_fact = resumen_mensual_ingresos_sd
-    # print("Ingresos mensuales por idcliente y bodega (detalle):\n", resumen_mensual_ingresos_fact)
+        # Step: Preparing data
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    resumen_mensual_ingresos_sd['ddma'] = pd.to_numeric(resumen_mensual_ingresos_sd['ddma'], errors='coerce')
-    resumen_mensual_ingresos_sd['inicial'] = pd.to_numeric(resumen_mensual_ingresos_sd['inicial'], errors='coerce')
-    resumen_mensual_ingresos_sd['pesokgs'] = pd.to_numeric(resumen_mensual_ingresos_sd['pesokgs'], errors='coerce')
+        resumen_mensual_ingresos_sd = pd.merge(
+            merged_ingresos_inventario, rpsdt_productos[['bodega', 'idubica', 'idingreso']], on='idingreso', how='left')
 
-    resumen_mensual_ingresos_sd['Bodega'] = resumen_mensual_ingresos_sd['Bodega'].fillna("INCOHERENT VALUES")
+        # Step: Merging data
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    # Ensure 'fecha_x' is in datetime format
-    resumen_mensual_ingresos_sd['fecha_x'] = pd.to_datetime(resumen_mensual_ingresos_sd['fecha_x'], errors='coerce')
+        resumen_mensual_ingresos_sd['dup_key'] = (resumen_mensual_ingresos_sd['idingreso'] +
+                                                  resumen_mensual_ingresos_sd['itemno'])
 
-    # Extract the month and year as a period (e.g., '2023-01')
-    resumen_mensual_ingresos_sd['month'] = resumen_mensual_ingresos_sd['fecha_x'].dt.to_period('M')
+        resumen_mensual_ingresos_sd = resumen_mensual_ingresos_sd.drop_duplicates(subset='dup_key', keep='first')
 
-    # Continue with your aggregation, now grouping by 'month' as well
-    resumen_mensual_ingresos = resumen_mensual_ingresos_sd.groupby(['month', 'idcontacto', 'Bodega']).agg({
-        'fecha_x': 'first',
-        'retnum_x': 'count',
-        'pesokgs': 'sum',
-        'inicial': 'sum',
-        'ddma': 'sum'
-    }).reset_index()
+        # Step: Droping duplicates
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    # Rename the columns accordingly
-    resumen_mensual_ingresos.rename(columns={
-        # 'month': 'first',
-        'pesokgs': 'Unidades',
-        'inicial': 'CBM',
-        'retnum_x': 'Pallets',
-        'ddma': 'Desprendimientos despues del mes de analisis'
-    }, inplace=True)
+        resumen_mensual_ingresos_sd['bodega_x'] = resumen_mensual_ingresos_sd['bodega_x'].str.strip().str.upper()
+        resumen_mensual_ingresos_sd['bodega_y'] = resumen_mensual_ingresos_sd['bodega_y'].str.strip().str.upper()
 
-    # Adjust 'CBM' by adding 'Desprendimientos despues del mes de analisis' where 'ddma' is not zero
-    resumen_mensual_ingresos['CBM'] += resumen_mensual_ingresos['Desprendimientos despues del mes de analisis']
+        # Apply the function to your dataframe to create a unified Bodega column
+        resumen_mensual_ingresos_sd['Bodega'] = resumen_mensual_ingresos_sd.apply(resolve_bodega, axis=1)
 
-    # # Now drop the 'ddma' column since it's no longer needed
-    # resumen_mensual_ingresos.drop(columns=['ddma'], inplace=True)
+        resumen_mensual_ingresos_fact = resumen_mensual_ingresos_sd
 
-    # Merge dataframe with incontac to obtain client name
-    resumen_mensual_ingresos_clientes = pd.merge(resumen_mensual_ingresos, supplier_info, on='idcontacto',
-                                                 how='left')
+        resumen_mensual_ingresos_sd['ddma'] = pd.to_numeric(resumen_mensual_ingresos_sd['ddma'], errors='coerce')
+        resumen_mensual_ingresos_sd['inicial'] = pd.to_numeric(resumen_mensual_ingresos_sd['inicial'], errors='coerce')
+        resumen_mensual_ingresos_sd['pesokgs'] = pd.to_numeric(resumen_mensual_ingresos_sd['pesokgs'], errors='coerce')
 
-    resumen_mensual_ingresos_clientes['descrip'] = resumen_mensual_ingresos_clientes.rename(
-        columns={'descrip': 'Cliente'}, inplace=True)
+        # Step: Preparing data
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    # print("Ingresos mensuales por idcliente y Bodega (agrupado 1):\n", resumen_mensual_ingresos_clientes)
+        resumen_mensual_ingresos_sd['Bodega'] = resumen_mensual_ingresos_sd['Bodega'].fillna("INCOHERENT VALUES")
 
-    # Continue with your aggregation, now grouping by 'month' as well
-    resumen_mensual_ingresos_clientes = resumen_mensual_ingresos_clientes.groupby(['month', 'Bodega', 'Cliente']).agg({
-        'fecha_x': 'first',
-        'idcontacto': 'first',  # Assuming 'idcontacto' is the same within each group
-        'Pallets': 'sum',
-        'Unidades': 'sum',
-        'CBM': 'sum'
-    }).reset_index()
+        # Ensure 'fecha_x' is in datetime format
+        resumen_mensual_ingresos_sd['fecha_x'] = pd.to_datetime(resumen_mensual_ingresos_sd['fecha_x'], errors='coerce')
 
-    output_path = os.path.join(get_base_output_path(), 'ingresos_cliente_bodega_historico.csv')
-    resumen_mensual_ingresos_clientes.to_csv(output_path, index=True)
+        # Step: Cleaning data
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
+
+        # Extract the month and year as a period (e.g., '2023-01')
+        resumen_mensual_ingresos_sd['month'] = resumen_mensual_ingresos_sd['fecha_x'].dt.to_period('M')
+
+        # Continue with your aggregation, now grouping by 'month' as well
+        resumen_mensual_ingresos = resumen_mensual_ingresos_sd.groupby(['month', 'idcontacto', 'Bodega']).agg({
+            'fecha_x': 'first',
+            'retnum_x': 'count',
+            'pesokgs': 'sum',
+            'inicial': 'sum',
+            'ddma': 'sum'
+        }).reset_index()
+
+        # Step: Grouping data
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
+
+        # Rename the columns accordingly
+        resumen_mensual_ingresos.rename(columns={
+            # 'month': 'first',
+            'pesokgs': 'Unidades',
+            'inicial': 'CBM',
+            'retnum_x': 'Pallets',
+            'ddma': 'Desprendimientos despues del mes de analisis'
+        }, inplace=True)
+
+        # Step: Renaming columns
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
+
+        # Adjust 'CBM' by adding 'Desprendimientos despues del mes de analisis' where 'ddma' is not zero
+        resumen_mensual_ingresos['CBM'] += resumen_mensual_ingresos['Desprendimientos despues del mes de analisis']
+
+        # Step: Complementing CBM data with partial shipments
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
+
+        # Merge dataframe with incontac to obtain client name
+        resumen_mensual_ingresos_clientes = pd.merge(resumen_mensual_ingresos, supplier_info, on='idcontacto',
+                                                     how='left')
+
+        # Step: Merging data
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
+
+        resumen_mensual_ingresos_clientes['descrip'] = resumen_mensual_ingresos_clientes.rename(
+            columns={'descrip': 'Cliente'}, inplace=True)
+
+        # print("Ingresos mensuales por idcliente y Bodega (agrupado 1):\n", resumen_mensual_ingresos_clientes)
+
+        # Continue with your aggregation, now grouping by 'month' as well
+        resumen_mensual_ingresos_clientes = resumen_mensual_ingresos_clientes.groupby(
+            ['month', 'Bodega', 'Cliente']).agg({
+            'fecha_x': 'first',
+            'idcontacto': 'first',  # Assuming 'idcontacto' is the same within each group
+            'Pallets': 'sum',
+            'Unidades': 'sum',
+            'CBM': 'sum'
+        }).reset_index()
+
+        # Step: Grouping data
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
+
+        output_path = os.path.join(get_base_output_path(), 'ingresos_cliente_bodega_historico.csv')
+        resumen_mensual_ingresos_clientes.to_csv(output_path, index=True)
+
+        # Step: Printing CSV data
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
     print("Historic inflow of CBM, pallets and units by client and warehouse:\n", resumen_mensual_ingresos_clientes)
+    print("Monthly reception data processed correctly.\n")
 
     return resumen_mensual_ingresos_clientes, resumen_mensual_ingresos_sd, resumen_mensual_ingresos_fact
 
 
 def monthly_dispatch_summary(registro_salidas, dispatched_inventory, supplier_info):
-    print("*** Historic Shipment Summary ***")
+    with Progress() as progress:
+        # Add a new task
+        task = progress.add_task("[green]Analyzing historic dispatch data: ", total=11)
 
-    # Data type conversions
-    registro_salidas['fecha'] = pd.to_datetime(registro_salidas['fecha'], errors='coerce')
-    registro_salidas['cantidad'] = pd.to_numeric(registro_salidas['cantidad'], errors='coerce')
-    registro_salidas['idcontacto'] = registro_salidas['idcontacto'].astype(str)
-    registro_salidas['idingreso'] = registro_salidas['idingreso'].astype(str)
+        # Data type conversions
+        registro_salidas['fecha'] = pd.to_datetime(registro_salidas['fecha'], errors='coerce')
+        registro_salidas['cantidad'] = pd.to_numeric(registro_salidas['cantidad'], errors='coerce')
+        registro_salidas['idcontacto'] = registro_salidas['idcontacto'].astype(str)
+        registro_salidas['idingreso'] = registro_salidas['idingreso'].astype(str)
 
-    dispatched_inventory['fecha'] = pd.to_datetime(dispatched_inventory['fecha'], errors='coerce')
-    dispatched_inventory['ingresa'] = pd.to_datetime(dispatched_inventory['ingresa'], errors='coerce')
-    dispatched_inventory['inicial'] = pd.to_numeric(dispatched_inventory['inicial'], errors='coerce')
-    dispatched_inventory['salidas'] = pd.to_numeric(dispatched_inventory['salidas'], errors='coerce')
-    dispatched_inventory['pesokgs'] = pd.to_numeric(dispatched_inventory['pesokgs'], errors='coerce')
-    dispatched_inventory['idcontacto'] = dispatched_inventory['idcontacto'].astype(str)
-    dispatched_inventory['idingreso'] = dispatched_inventory['idingreso'].astype(str)
+        dispatched_inventory['fecha'] = pd.to_datetime(dispatched_inventory['fecha'], errors='coerce')
+        dispatched_inventory['ingresa'] = pd.to_datetime(dispatched_inventory['ingresa'], errors='coerce')
+        dispatched_inventory['inicial'] = pd.to_numeric(dispatched_inventory['inicial'], errors='coerce')
+        dispatched_inventory['salidas'] = pd.to_numeric(dispatched_inventory['salidas'], errors='coerce')
+        dispatched_inventory['pesokgs'] = pd.to_numeric(dispatched_inventory['pesokgs'], errors='coerce')
+        dispatched_inventory['idcontacto'] = dispatched_inventory['idcontacto'].astype(str)
+        dispatched_inventory['idingreso'] = dispatched_inventory['idingreso'].astype(str)
 
-    supplier_info['idcontacto'] = supplier_info['idcontacto'].astype(str).str.strip()
+        supplier_info['idcontacto'] = supplier_info['idcontacto'].astype(str).str.strip()
 
-    # Pad 'idcontacto' and 'idingreso' to match maximum length
-    max_length_idc = max(registro_salidas['idcontacto'].str.len().max(),
-                         supplier_info['idcontacto'].str.len().max())
-    registro_salidas['idcontacto'] = registro_salidas['idcontacto'].str.zfill(max_length_idc)
-    dispatched_inventory['idcontacto'] = dispatched_inventory['idcontacto'].str.zfill(max_length_idc)
-    supplier_info['idcontacto'] = supplier_info['idcontacto'].str.zfill(max_length_idc)
+        # Step: Preparing data
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    max_length_idi = max(registro_salidas['idingreso'].str.len().max(),
-                         dispatched_inventory['idingreso'].str.len().max())
-    registro_salidas['idingreso'] = registro_salidas['idingreso'].str.zfill(max_length_idi)
-    dispatched_inventory['idingreso'] = dispatched_inventory['idingreso'].str.zfill(max_length_idi)
+        # Pad 'idcontacto' and 'idingreso' to match maximum length
+        max_length_idc = max(registro_salidas['idcontacto'].str.len().max(),
+                             supplier_info['idcontacto'].str.len().max())
+        registro_salidas['idcontacto'] = registro_salidas['idcontacto'].str.zfill(max_length_idc)
+        dispatched_inventory['idcontacto'] = dispatched_inventory['idcontacto'].str.zfill(max_length_idc)
+        supplier_info['idcontacto'] = supplier_info['idcontacto'].str.zfill(max_length_idc)
 
-    # Sort dataframes
-    registro_salidas = registro_salidas.sort_values(by='fecha', ascending=False)
-    dispatched_inventory = dispatched_inventory.sort_values(by='fecha', ascending=False)
+        max_length_idi = max(registro_salidas['idingreso'].str.len().max(),
+                             dispatched_inventory['idingreso'].str.len().max())
+        registro_salidas['idingreso'] = registro_salidas['idingreso'].str.zfill(max_length_idi)
+        dispatched_inventory['idingreso'] = dispatched_inventory['idingreso'].str.zfill(max_length_idi)
 
-    # Perform a left merge to keep all rows from registro_salidas
-    merged_despachos_inventario = pd.merge(
-        registro_salidas,
-        dispatched_inventory,
-        on='idingreso',
-        how='left',
-        suffixes=('_x', '_y')
-    )
+        # Step: Normalizing keys
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    # Ensure 'fecha_x' is in datetime format
-    merged_despachos_inventario['fecha_x'] = pd.to_datetime(merged_despachos_inventario['fecha_x'], errors='coerce')
+        # Sort dataframes
+        registro_salidas = registro_salidas.sort_values(by='fecha', ascending=False)
+        dispatched_inventory = dispatched_inventory.sort_values(by='fecha', ascending=False)
 
-    # Extract the month and year as a period
-    merged_despachos_inventario['month'] = merged_despachos_inventario['fecha_x'].dt.to_period('M')
+        # Step: Sorting data
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    # Create a unique key for duplicates
-    merged_despachos_inventario['dup_key'] = (merged_despachos_inventario['idingreso'] +
-                                              merged_despachos_inventario['itemno_x'])
+        # Perform a left merge to keep all rows from registro_salidas
+        merged_despachos_inventario = pd.merge(
+            registro_salidas,
+            dispatched_inventory,
+            on='idingreso',
+            how='left',
+            suffixes=('_x', '_y')
+        )
 
-    # Drop duplicates based on 'dup_key'
-    merged_despachos_inventario = merged_despachos_inventario.drop_duplicates(subset='dup_key', keep='first')
+        # Step: Merging data
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    # Handle 'DESCONOCIDO' in 'bodega'
-    filtered_bodegas = merged_despachos_inventario[merged_despachos_inventario['bodega'] != 'DESCONOCIDO']
-    replacement_bodega = filtered_bodegas.groupby('idcontacto_x').filter(lambda x: len(x['bodega'].unique()) == 1)
-    replacement_bodega = replacement_bodega.groupby('idcontacto_x')['bodega'].first()
-    mask = (merged_despachos_inventario['bodega'] == 'DESCONOCIDO') & merged_despachos_inventario['idcontacto_x'].isin(
-        replacement_bodega.index)
-    merged_despachos_inventario.loc[mask, 'bodega'] = merged_despachos_inventario.loc[mask, 'idcontacto_x'].map(
-        replacement_bodega)
+        # Ensure 'fecha_x' is in datetime format
+        merged_despachos_inventario['fecha_x'] = pd.to_datetime(merged_despachos_inventario['fecha_x'], errors='coerce')
 
-    resumen_despachos_cliente_fact = merged_despachos_inventario
+        # Extract the month and year as a period
+        merged_despachos_inventario['month'] = merged_despachos_inventario['fecha_x'].dt.to_period('M')
 
-    print("Despachos mensuales por idcliente y bodega (detalle):\n", resumen_despachos_cliente_fact)
+        # Step: preparing data
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    # Continue with your aggregation, now grouping by 'month' as well
-    resumen_mensual_despachos = merged_despachos_inventario.groupby(['month', 'idcontacto_x', 'bodega']).agg({
-        'fecha_x': 'first',
-        'numero': 'count',
-        'pesokgs': 'sum',
-        'cantidad': 'sum',
-    }).reset_index()
+        # Create a unique key for duplicates
+        merged_despachos_inventario['dup_key'] = (merged_despachos_inventario['idingreso'] +
+                                                  merged_despachos_inventario['itemno_x'])
 
-    # Rename the columns
-    resumen_mensual_despachos.rename(columns={
-        'idcontacto_x': 'idcontacto',
-        'bodega': 'Bodega',
-        'pesokgs': 'Unidades',
-        'cantidad': 'CBM',
-        'numero': 'Pallets',
-    }, inplace=True)
+        # Drop duplicates based on 'dup_key'
+        merged_despachos_inventario = merged_despachos_inventario.drop_duplicates(subset='dup_key', keep='first')
 
-    # Merge with 'supplier_info' to get 'Cliente' information
-    resumen_mensual_despachos_clientes = pd.merge(
-        resumen_mensual_despachos, supplier_info[['idcontacto', 'descrip']], on='idcontacto', how='left'
-    )
+        # Step: Building key and dropping duplicates
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    # Rename 'descrip' to 'Cliente'
-    resumen_mensual_despachos_clientes.rename(columns={'descrip': 'Cliente'}, inplace=True)
+        # Handle 'DESCONOCIDO' in 'bodega'
+        filtered_bodegas = merged_despachos_inventario[merged_despachos_inventario['bodega'] != 'DESCONOCIDO']
+        replacement_bodega = filtered_bodegas.groupby('idcontacto_x').filter(lambda x: len(x['bodega'].unique()) == 1)
+        replacement_bodega = replacement_bodega.groupby('idcontacto_x')['bodega'].first()
+        mask = (merged_despachos_inventario['bodega'] == 'DESCONOCIDO') & merged_despachos_inventario[
+            'idcontacto_x'].isin(
+            replacement_bodega.index)
+        merged_despachos_inventario.loc[mask, 'bodega'] = merged_despachos_inventario.loc[mask, 'idcontacto_x'].map(
+            replacement_bodega)
 
-    # Group by 'month', 'Bodega', and 'Cliente', summing numerical values
-    resumen_mensual_despachos_clientes_grouped = resumen_mensual_despachos_clientes.groupby(
-        ['month', 'Bodega', 'Cliente']
-    ).agg({
-        'fecha_x': 'first',
-        'idcontacto': 'first',
-        'Pallets': 'sum',
-        'Unidades': 'sum',
-        'CBM': 'sum',
-    }).reset_index()
+        # Step: Identifying unknowns and cleaning data
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    # Save the final DataFrame to CSV
-    output_path = os.path.join(get_base_output_path(), 'despachos_cliente_bodega_mensual_historico.csv')
-    resumen_mensual_despachos_clientes_grouped.to_csv(output_path, index=False)
-    output_path = os.path.join(get_base_output_path(), 'resumen_despachos_cliente_fact.csv')
-    resumen_despachos_cliente_fact.to_csv(output_path, index=False)
+        resumen_despachos_cliente_fact = merged_despachos_inventario
+
+        # Continue with your aggregation, now grouping by 'month' as well
+        resumen_mensual_despachos = merged_despachos_inventario.groupby(['month', 'idcontacto_x', 'bodega']).agg({
+            'fecha_x': 'first',
+            'numero': 'count',
+            'pesokgs': 'sum',
+            'cantidad': 'sum',
+        }).reset_index()
+
+        # Step: Grouping data
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
+
+        # Rename the columns
+        resumen_mensual_despachos.rename(columns={
+            'idcontacto_x': 'idcontacto',
+            'bodega': 'Bodega',
+            'pesokgs': 'Unidades',
+            'cantidad': 'CBM',
+            'numero': 'Pallets',
+        }, inplace=True)
+
+        # Merge with 'supplier_info' to get 'Cliente' information
+        resumen_mensual_despachos_clientes = pd.merge(
+            resumen_mensual_despachos, supplier_info[['idcontacto', 'descrip']], on='idcontacto', how='left'
+        )
+
+        # Step: Renaming columns and merging data
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
+
+        # Rename 'descrip' to 'Cliente'
+        resumen_mensual_despachos_clientes.rename(columns={'descrip': 'Cliente'}, inplace=True)
+
+        # Group by 'month', 'Bodega', and 'Cliente', summing numerical values
+        resumen_mensual_despachos_clientes_grouped = resumen_mensual_despachos_clientes.groupby(
+            ['month', 'Bodega', 'Cliente']
+        ).agg({
+            'fecha_x': 'first',
+            'idcontacto': 'first',
+            'Pallets': 'sum',
+            'Unidades': 'sum',
+            'CBM': 'sum',
+        }).reset_index()
+
+        # Step: Renaming columns and grouping data
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
+
+        # Save the final DataFrame to CSV
+        output_path = os.path.join(get_base_output_path(), 'despachos_cliente_bodega_mensual_historico.csv')
+        resumen_mensual_despachos_clientes_grouped.to_csv(output_path, index=False)
+
+        # Step: Printing CSV data
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
     # Print the final DataFrame
     print("Historic outflow of CBM, pallets and units by client and warehouse:\n",
           resumen_mensual_despachos_clientes_grouped)
+    print("Monthly shipment data processed correctly.\n")
 
     return resumen_mensual_despachos_clientes_grouped, merged_despachos_inventario, resumen_despachos_cliente_fact
 
@@ -1195,505 +1372,724 @@ def group_by_month_bodega(resumen_mensual_ingresos_clientes, resumen_mensual_des
 
 
 def capacity_measured_in_cubic_meters(saldo_inventory, supplier_info):
-    print("\n*** Actual volume status by warehouse ***\n")
-    # Leer los datos especificando los tipos de datos
-    if os.name == 'nt':
-        inmodelo_clasificacion = pd.read_excel(
-            r'\\192.168.10.18\gem\006 MORIBUS\ANALISIS y PROYECTOS\varios\modelos_clasificacion.xlsx')
-    else:
-        inmodelo_clasificacion = pd.read_excel(
-            r'/Users/j.m./Library/Mobile Documents/com~apple~CloudDocs/GM/MOBU - OPL/varios/modelos_clasificacion.xlsx')
+    with Progress() as progress:
+        # Add a new task
+        task = progress.add_task("[green]Analyzing Client Inventory: ", total=10)
+        # Leer los datos especificando los tipos de datos
+        if os.name == 'nt':
+            inmodelo_clasificacion = pd.read_excel(
+                r'\\192.168.10.18\gem\006 MORIBUS\ANALISIS y PROYECTOS\varios\modelos_clasificacion.xlsx')
+        else:
+            inmodelo_clasificacion = pd.read_excel(
+                r'/Users/j.m./Library/Mobile Documents/com~apple~CloudDocs/GM/MOBU - OPL/varios/modelos_clasificacion.xlsx')
 
-    # print("Saldo inventory:\n", saldo_inventory)
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    saldo_inventory = saldo_inventory[saldo_inventory['idstatus'] == '01']
+        saldo_inventory = saldo_inventory[saldo_inventory['idstatus'] == '01']
 
-    saldo_inventory['fecha'] = pd.to_datetime(saldo_inventory['fecha'])
-    # Ordenar fechas de más reciente a más antiguas
-    saldo_inventory = saldo_inventory.sort_values(by='fecha', ascending=False)
+        saldo_inventory['fecha'] = pd.to_datetime(saldo_inventory['fecha'])
+        # Ordenar fechas de más reciente a más antiguas
+        saldo_inventory = saldo_inventory.sort_values(by='fecha', ascending=False)
 
-    # Asegurar que la columna 'idubica' y 'idmodelo' sea de tipo string
-    saldo_inventory['idubica'].astype(str)
-    saldo_inventory['idmodelo'].astype(str)
-    saldo_inventory['inicial'] = pd.to_numeric(saldo_inventory['inicial'], errors='coerce')
-    saldo_inventory['salidas'] = pd.to_numeric(saldo_inventory['salidas'], errors='coerce')
-    saldo_inventory['pesokgs'] = pd.to_numeric(saldo_inventory['pesokgs'], errors='coerce')
-    inmodelo_clasificacion['idmodelo'].astype(str)
+        # Asegurar que la columna 'idubica' y 'idmodelo' sea de tipo string
+        saldo_inventory['idubica'].astype(str)
+        saldo_inventory['idmodelo'].astype(str)
+        saldo_inventory['inicial'] = pd.to_numeric(saldo_inventory['inicial'], errors='coerce')
+        saldo_inventory['salidas'] = pd.to_numeric(saldo_inventory['salidas'], errors='coerce')
+        saldo_inventory['pesokgs'] = pd.to_numeric(saldo_inventory['pesokgs'], errors='coerce')
+        inmodelo_clasificacion['idmodelo'].astype(str)
 
-    # Eliminar espacios en blanco de los valores
-    saldo_inventory['idmodelo'].str.strip()
-    inmodelo_clasificacion['idmodelo'].str.strip()
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    # Asegurar que las columnas sean de tipo string y eliminar espacios en blanco
-    saldo_inventory['idmodelo'] = saldo_inventory['idmodelo'].astype(str).str.strip()
-    inmodelo_clasificacion['idmodelo'] = inmodelo_clasificacion['idmodelo'].astype(str).str.strip()
+        # Eliminar espacios en blanco de los valores
+        saldo_inventory['idmodelo'].str.strip()
+        inmodelo_clasificacion['idmodelo'].str.strip()
 
-    saldo_inventory = pd.merge(saldo_inventory, inmodelo_clasificacion, how='left', on='idmodelo')
+        # Asegurar que las columnas sean de tipo string y eliminar espacios en blanco
+        saldo_inventory['idmodelo'] = saldo_inventory['idmodelo'].astype(str).str.strip()
+        inmodelo_clasificacion['idmodelo'] = inmodelo_clasificacion['idmodelo'].astype(str).str.strip()
 
-    # Update 'inicial' with values from 'cubicaje' where 'cubicaje' is not NaN
-    saldo_inventory.loc[saldo_inventory['cubicaje'].notna(), 'inicial'] = saldo_inventory['cubicaje']
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    # Drop the specified columns
-    saldo_inventory = saldo_inventory.drop(columns=['descrip', 'clasificacion', 'cubicaje'])
+        saldo_inventory = pd.merge(saldo_inventory, inmodelo_clasificacion, how='left', on='idmodelo')
 
-    saldo_inv_cliente_fact = saldo_inventory
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    output_path = os.path.join(get_base_output_path(), 'insaldo_para_fact.csv')
-    saldo_inv_cliente_fact.to_csv(output_path, index=True)
+        # Update 'inicial' with values from 'cubicaje' where 'cubicaje' is not NaN
+        saldo_inventory.loc[saldo_inventory['cubicaje'].notna(), 'inicial'] = saldo_inventory['cubicaje']
 
-    # Determine the maximum length of 'idcontacto' values in both DataFrames
-    max_length = max(saldo_inventory['idcontacto'].str.len().max(),
-                     supplier_info['idcontacto'].str.len().max())
+        # Drop the specified columns
+        saldo_inventory = saldo_inventory.drop(columns=['descrip', 'clasificacion', 'cubicaje'])
 
-    # Pad 'idcontacto' values with leading zeros to match the maximum length
-    saldo_inventory.loc[:, 'idcontacto'] = saldo_inventory['idcontacto'].str.zfill(max_length)
-    supplier_info['idcontacto'] = supplier_info['idcontacto'].str.zfill(max_length)
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    saldo_inventory['dup_key'] = (saldo_inventory['idingreso'] +
-                                  saldo_inventory['itemno'])
+        saldo_inv_cliente_fact = saldo_inventory
 
-    saldo_inventory = saldo_inventory.drop_duplicates(subset='dup_key', keep='first')
+        # Determine the maximum length of 'idcontacto' values in both DataFrames
+        max_length = max(saldo_inventory['idcontacto'].str.len().max(),
+                         supplier_info['idcontacto'].str.len().max())
 
-    saldo_inventory_summed_bodega = saldo_inventory.groupby([
-        'bodega',
-        'idcontacto'
-    ]).agg({'inicial': 'sum', 'idmodelo': 'count', 'pesokgs': 'sum'}).reset_index()
+        # Pad 'idcontacto' values with leading zeros to match the maximum length
+        saldo_inventory.loc[:, 'idcontacto'] = saldo_inventory['idcontacto'].str.zfill(max_length)
+        supplier_info['idcontacto'] = supplier_info['idcontacto'].str.zfill(max_length)
 
-    saldo_inventory_summed_bodega = saldo_inventory_summed_bodega.drop(columns=[
-        'idcontacto',
-    ])
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    # Rename the columns
-    saldo_inventory_summed_bodega.rename(columns={
-        'bodega': 'Bodega',
-        'pesokgs': 'Unidades',
-        'inicial': 'CBM',
-        'idmodelo': 'Pallets',
-    }, inplace=True)
+        saldo_inventory['dup_key'] = (saldo_inventory['idingreso'] +
+                                      saldo_inventory['itemno'])
 
-    print("\nActual Client Volume Status by Warehouse to date:\n", saldo_inventory_summed_bodega)
+        saldo_inventory = saldo_inventory.drop_duplicates(subset='dup_key', keep='first')
+
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
+
+        saldo_inventory_summed_bodega = saldo_inventory.groupby([
+            'bodega',
+            'idcontacto'
+        ]).agg({'inicial': 'sum', 'idmodelo': 'count',
+                'pesokgs': 'sum'}).reset_index()
+
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
+
+        saldo_inventory_summed_bodega = saldo_inventory_summed_bodega.drop(columns=[
+            'idcontacto',
+        ])
+
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
+
+        # Rename the columns
+        saldo_inventory_summed_bodega.rename(columns={
+            'bodega': 'Bodega',
+            'pesokgs': 'Unidades',
+            'inicial': 'CBM',
+            'idmodelo': 'Pallets',
+        }, inplace=True)
+
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
+
+    print("\nActual Client Inventory Status by Warehouse:\n", saldo_inventory_summed_bodega)
+    print("Clients Inventory data analyzed correctly.\n")
 
     return saldo_inv_cliente_fact
 
 
 def billing_data_reconstruction(saldo_inv_cliente_fact, resumen_mensual_ingresos_fact, resumen_despachos_cliente_fact,
                                 start_date, end_date, registro_ingresos):
+    with Progress() as progress:
+        # Add a new task
+        task = progress.add_task("[green]Processing and analyzing Client's operational Data: ", total=44)
 
-    resumen_mensual_ingresos_fact['fecha_x'] = pd.to_datetime(resumen_mensual_ingresos_fact['fecha_x'])
-    resumen_despachos_cliente_fact['fecha_x'] = pd.to_datetime(resumen_despachos_cliente_fact['fecha_x'])
-    resumen_mensual_ingresos_fact['ddma'] = resumen_mensual_ingresos_fact['ddma'].fillna("")
+        resumen_mensual_ingresos_fact['fecha_x'] = pd.to_datetime(resumen_mensual_ingresos_fact['fecha_x'])
+        resumen_despachos_cliente_fact['fecha_x'] = pd.to_datetime(resumen_despachos_cliente_fact['fecha_x'])
+        resumen_mensual_ingresos_fact['ddma'] = resumen_mensual_ingresos_fact['ddma'].fillna("")
 
-# Up until this point, the data is historical.
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    print("Available inventory: \n", saldo_inv_cliente_fact)
-    print("Inflow for the specified date frame:\n", resumen_mensual_ingresos_fact)
-    print("Outflow for the specified date frame:\n", resumen_despachos_cliente_fact)
+        # # Save the final DataFrame to CSV
+        # output_path = os.path.join(get_base_output_path(), 'resumen_mensual_ingresos_fact.csv')
+        # resumen_mensual_ingresos_fact.to_csv(output_path, index=False)
+        # output_path = os.path.join(get_base_output_path(), 'saldo_inv_cliente_fact.csv')
+        # saldo_inv_cliente_fact.to_csv(output_path, index=False)
 
-    # Save the final DataFrame to CSV
-    output_path = os.path.join(get_base_output_path(), 'resumen_mensual_ingresos_fact.csv')
-    resumen_mensual_ingresos_fact.to_csv(output_path, index=False)
-    output_path = os.path.join(get_base_output_path(), 'saldo_inv_cliente_fact.csv')
-    saldo_inv_cliente_fact.to_csv(output_path, index=False)
+        # *** INFLOW CBM AND PALLETS ***
 
-    # *** INFLOW CBM AND PALLETS ***
+        # Replace values in 'idubica1' that start with 'R' with an empty string
+        saldo_inv_cliente_fact['idubica1'] = saldo_inv_cliente_fact['idubica1'].str.replace(r'^R.*', '', regex=True)
+        saldo_inv_cliente_fact['idubica1'] = saldo_inv_cliente_fact['idubica1'].str.replace(r'^TM.*', '', regex=True)
 
-    # Replace values in 'idubica1' that start with 'R' with an empty string
-    saldo_inv_cliente_fact['idubica1'] = saldo_inv_cliente_fact['idubica1'].str.replace(r'^R.*', '', regex=True)
-    saldo_inv_cliente_fact['idubica1'] = saldo_inv_cliente_fact['idubica1'].str.replace(r'^TM.*', '', regex=True)
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    # Fill empty values in 'idubica1' with random and unique values
-    empty_indices = saldo_inv_cliente_fact[saldo_inv_cliente_fact['idubica1'] == ''].index
+        # Fill empty values in 'idubica1' with random and unique values
+        empty_indices = saldo_inv_cliente_fact[saldo_inv_cliente_fact['idubica1'] == ''].index
 
-    # Generate unique random values using random.sample(), which guarantees uniqueness
-    unique_values = random.sample(range(1, 1000000), len(empty_indices))
+        # Generate unique random values using random.sample(), which guarantees uniqueness
+        unique_values = random.sample(range(1, 1000000), len(empty_indices))
 
-    # Convert to strings and assign back to the empty slots
-    unique_values = [str(value) for value in unique_values]
-    saldo_inv_cliente_fact.loc[empty_indices, 'idubica1'] = unique_values
+        # Convert to strings and assign back to the empty slots
+        unique_values = [str(value) for value in unique_values]
+        saldo_inv_cliente_fact.loc[empty_indices, 'idubica1'] = unique_values
 
-    inflow_with_mode_clean = saldo_inv_cliente_fact.dropna(subset=['idmodelo', 'idubica1'])
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    # Step 1: Group by 'idmodelo' and 'idubica1' to count occurrences
-    grouped_by_idubica1 = inflow_with_mode_clean[saldo_inv_cliente_fact['idubica1'].notna()].groupby(
-        ['idmodelo', 'idubica1']).size().reset_index(name='count')
+        inflow_with_mode_clean = saldo_inv_cliente_fact.dropna(subset=['idmodelo', 'idubica1'])
 
-    # Step 2: Find the mode of the count for each idmodelo
-    mode_grouping = grouped_by_idubica1.groupby('idmodelo')['count'].agg(lambda x: x.mode()[0]).reset_index(
-        name='mode_count')
+        # Step 1: Group by 'idmodelo' and 'idubica1' to count occurrences
+        grouped_by_idubica1 = inflow_with_mode_clean[saldo_inv_cliente_fact['idubica1'].notna()].groupby(
+            ['idmodelo', 'idubica1']).size().reset_index(name='count')
 
-    # Step 3: Merge mode count with the inflow data (resumen_mensual_ingresos_fact)
-    inflow_with_mode = pd.merge(resumen_mensual_ingresos_fact, mode_grouping, on='idmodelo', how='left')
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    # Step 4: Fill missing mode_count with a default value (e.g., 1 if no grouping is available)
-    inflow_with_mode['mode_count'].fillna(1, inplace=True)
+        # Step 2: Find the mode of the count for each idmodelo
+        mode_grouping = grouped_by_idubica1.groupby('idmodelo')['count'].agg(lambda x: x.mode()[0]).reset_index(
+            name='mode_count')
 
-    # Step 5: Calculate the number of rows per idingreso and idmodelo (consider specific products within each ingreso)
-    df_grouped = inflow_with_mode.groupby(['idingreso', 'idmodelo']).size().reset_index(name='num_rows')
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    # Step 6: Merge the number of rows per idingreso and idmodelo back into the inflow_with_mode dataframe
-    inflow_with_mode = pd.merge(inflow_with_mode, df_grouped, on=['idingreso', 'idmodelo'], how='left')
+        # Step 3: Merge mode count with the inflow data (resumen_mensual_ingresos_fact)
+        inflow_with_mode = pd.merge(resumen_mensual_ingresos_fact, mode_grouping, on='idmodelo', how='left')
 
-    # Step 7: Calculate the number of pallets by dividing the num_rows by mode_count
-    inflow_with_mode['pallets'] = (inflow_with_mode['num_rows'] / inflow_with_mode['mode_count']).apply(np.ceil)
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    # Step 8: Group by idingreso and idmodelo to get the correct number of pallets for each combination
-    pallets_per_ingreso = inflow_with_mode.groupby(['idingreso', 'idmodelo'])['pallets'].first().reset_index()
+        # Step 4: Fill missing mode_count with a default value (e.g., 1 if no grouping is available)
+        inflow_with_mode['mode_count'].fillna(1, inplace=True)
 
-    # Step 9: Merge the pallet count back to the original dataframe
-    inflow_with_mode = pd.merge(inflow_with_mode, pallets_per_ingreso[['idingreso', 'idmodelo', 'pallets']],
-                                on=['idingreso', 'idmodelo'], how='left', suffixes=('', '_final'))
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    inflow_with_mode['inicial'] = pd.to_numeric(inflow_with_mode['inicial'], errors='coerce')
-    inflow_with_mode['pallets_final'] = pd.to_numeric(inflow_with_mode['pallets_final'], errors='coerce').astype(
-        'Int64')
-    inflow_with_mode['pallet_oficial'] = pd.to_numeric(inflow_with_mode.get('pallet_oficial', np.nan), errors='coerce')
+        # Step 5: Calculate the number of rows per idingreso and idmodelo (consider specific products within each ingreso)
+        df_grouped = inflow_with_mode.groupby(['idingreso', 'idmodelo']).size().reset_index(name='num_rows')
 
-    # Step 1: Define a function to apply the conditional logic
-    def choose_pallets(row):
-        # If pallet_oficial is available, use it; otherwise, use pallets_final
-        return row['pallet_oficial'] if not pd.isna(row['pallet_oficial']) else row['pallets_final']
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    # Step 2: Apply the custom function
-    inflow_with_mode['pallets_final'] = inflow_with_mode.apply(choose_pallets, axis=1)
+        # Step 6: Merge the number of rows per idingreso and idmodelo back into the inflow_with_mode dataframe
+        inflow_with_mode = pd.merge(inflow_with_mode, df_grouped, on=['idingreso', 'idmodelo'], how='left')
 
-    # Ensure all values in 'ddma' are numeric, and replace any non-numeric values with NaN
-    inflow_with_mode['ddma'] = pd.to_numeric(inflow_with_mode['ddma'], errors='coerce')
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    # Fill NaNs in 'ddma' with empty strings
-    inflow_with_mode['ddma'] = inflow_with_mode['ddma'].fillna(0.0)
+        # Step 7: Calculate the number of pallets by dividing the num_rows by mode_count
+        inflow_with_mode['pallets'] = (inflow_with_mode['num_rows'] / inflow_with_mode['mode_count']).apply(np.ceil)
 
-    # Print unique values of 'ddma' after filling NaNs
-    print("Unique values in 'ddma' after fillna:")
-    print(inflow_with_mode['ddma'].unique())
+        # Step 8: Group by idingreso and idmodelo to get the correct number of pallets for each combination
+        pallets_per_ingreso = inflow_with_mode.groupby(['idingreso', 'idmodelo'])['pallets'].first().reset_index()
 
-    # Define a function to adjust the pallet count for each group
-    def adjust_pallets_final(group):
-        # Count the number of rows with 'ddma' > 0
-        num_splits = (group['ddma'] > 0).sum()
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-        # Subtract the number of splits from the initial pallet count (applies to all rows in the group)
-        adjusted_pallets = group['pallets'].iloc[0] - num_splits
+        # Step 9: Merge the pallet count back to the original dataframe
+        inflow_with_mode = pd.merge(inflow_with_mode, pallets_per_ingreso[['idingreso', 'idmodelo', 'pallets']],
+                                    on=['idingreso', 'idmodelo'], how='left', suffixes=('', '_final'))
+
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
+
+        inflow_with_mode['inicial'] = pd.to_numeric(inflow_with_mode['inicial'], errors='coerce')
+        inflow_with_mode['pallets_final'] = pd.to_numeric(inflow_with_mode['pallets_final'], errors='coerce').astype(
+            'Int64')
+        inflow_with_mode['pallet_oficial'] = pd.to_numeric(inflow_with_mode.get('pallet_oficial', np.nan),
+                                                           errors='coerce')
+
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
+
+        # Step 1: Define a function to apply the conditional logic
+        def choose_pallets(row):
+            # If pallet_oficial is available, use it; otherwise, use pallets_final
+            return row['pallet_oficial'] if not pd.isna(row['pallet_oficial']) else row['pallets_final']
+
+        # Step 2: Apply the custom function
+        inflow_with_mode['pallets_final'] = inflow_with_mode.apply(choose_pallets, axis=1)
+
+        # Ensure all values in 'ddma' are numeric, and replace any non-numeric values with NaN
+        inflow_with_mode['ddma'] = pd.to_numeric(inflow_with_mode['ddma'], errors='coerce')
 
-        # Assign the adjusted value to 'pallets_final' for all rows in the group
-        group['pallets_final'] = adjusted_pallets
-
-        return group
-
-    # Group by 'idingreso' and 'idmodelo' and apply the adjustment function
-    inflow_with_mode = inflow_with_mode.groupby(['idingreso', 'idmodelo'], group_keys=False).apply(adjust_pallets_final)
-
-
-    # Ensure that the pallet count is not less than zero after adjustment
-    inflow_with_mode['pallets_final'] = inflow_with_mode['pallets_final'].clip(lower=0)
-
-    # Print the result to verify
-    print(inflow_with_mode[['idingreso', 'idmodelo', 'ddma', 'pallets_final']])
-
-    # Keep the historical df for further purposes.
-    inflow_with_mode_historical = inflow_with_mode
-
-    # Filter data within the date range
-    inflow_with_mode = inflow_with_mode[
-        (inflow_with_mode['fecha_x'] >= start_date) &
-        (inflow_with_mode['fecha_x'] <= end_date)
-        ]
-
-    # Step 3: Rename columns as needed
-    inflow_with_mode.rename(columns={
-        'fecha_x': 'Date',
-        'descrip': 'Description',
-        'Bodega': 'Warehouse',
-        'inicial': 'CBM',
-        'pesokgs': 'Weight or Units',
-        'pallets_final': 'Pallets'
-    }, inplace=True)
-
-    # Ensure 'idingreso' is not part of the index before performing groupby
-    if 'idingreso' in inflow_with_mode.index.names:
-        inflow_with_mode.reset_index(drop=True, inplace=True)
-
-    # Step 4: Final grouping by 'idingreso' and 'idmodelo' to aggregate relevant columns
-    inflow_grouped = inflow_with_mode.groupby(['idingreso', 'idmodelo']).agg({
-        'Date': 'first',
-        'Description': 'first',
-        'CBM': 'sum',
-        'Pallets': 'min',
-        'Weight or Units': 'sum',
-        'Warehouse': 'first'
-
-    }).reset_index()
-
-    print("\nFinal Inflow dataframe:\n", inflow_grouped)
-
-    # Final step: Write the cleaned outflow data to CSV or display as needed
-    output_path = os.path.join(get_base_output_path(), 'final_inflow_df_fact.csv')
-    inflow_grouped.to_csv(output_path, index=False)
-
-    # ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-
-    # *** ACTUAL INVENTORY DATAFRAME ***
-
-    # Step 1: Filter rows where 'idubica1' is not blank, not NaN, and does not start with 'R'
-    filtered_df = saldo_inv_cliente_fact[
-        saldo_inv_cliente_fact['idubica1'].notna() &  # Not NaN
-        (saldo_inv_cliente_fact['idubica1'] != '') &  # Not blank
-        ~saldo_inv_cliente_fact['idubica1'].str.startswith('R')  # Does not start with 'R'
-        ]
-
-    output_path = os.path.join(get_base_output_path(), 'saldo_inv_cliente_fact.csv')
-    saldo_inv_cliente_fact.to_csv(output_path, index=False)
-    output_path = os.path.join(get_base_output_path(), 'filtered_df.csv')
-    filtered_df.to_csv(output_path, index=False)
-
-
-    # Step 2: Create a 'pallets' column with value 1 for each row
-    filtered_df['pallets'] = 1
-
-    # Step 3: Group by 'idubica1' and aggregate columns
-    grouped_df = filtered_df.groupby('idubica1').agg({
-        'idcentro': 'first',
-        'idbodega': 'first',
-        'idingreso': 'first',
-        'itemno': 'last',
-        'idstatus': 'first',
-        'fecha': 'first',
-        'idcontacto': 'first',
-        'idubica': 'first',
-        'pesokgs': 'sum',  # Summing numerical columns
-        'inicial': 'sum',  # Summing 'inicial'
-        'salidas': 'sum',  # Summing 'salidas'
-        'bodega': 'first',
-        'dup_key': 'first',
-        'pallets': 'count'  # Summing 'pallets', which should now be 1 for each row
-    }).reset_index()
-
-    # Step 4: Get the rows where 'idubica1' is blank or starts with 'R'
-    remaining_df = saldo_inv_cliente_fact[
-        saldo_inv_cliente_fact['idubica1'].isna() |
-        (saldo_inv_cliente_fact['idubica1'] == '') |
-        saldo_inv_cliente_fact['idubica1'].str.startswith('R')
-        ]
-
-    # Step 5: Assign 'pallets' = 1 for rows without 'idubica1' or starting with 'R'
-    remaining_df['pallets'] = 1
-
-    # Step 6: Concatenate the grouped rows with the remaining rows
-    final_df = pd.concat([grouped_df, remaining_df]).reset_index(drop=True)
-
-    # Step 7: Group by 'idingreso' and aggregate columns (final)
-    final_df = final_df.groupby('idingreso').agg({
-        'itemno': 'first',
-        'dup_key': 'first',
-        'fecha': 'first',
-        'idcontacto': 'first',
-        'idubica': 'first',
-        'inicial': 'sum',  # Summing 'inicial'
-        'pallets': 'count',
-        'pesokgs': 'sum',  # Summing numerical columns
-        'bodega': 'first',
-    }).reset_index()
-
-    # Add the 'Days' column that calculates the number of days from the 'Date' to the current date
-    final_df['fecha'] = pd.to_datetime(final_df['fecha']).dt.date
-    final_df['Days'] = (datetime.now().date() - pd.to_datetime(final_df['fecha']).dt.date).apply(lambda x: x.days) + 1
-
-    final_df.rename(columns={
-        'fecha': 'Date',
-        'idubica': 'locationID',
-        'idubica1': 'Tarima',
-        'inicial': 'CBM',
-        'pesokgs': 'Weight or Units',
-        'bodega': 'Warehouse',
-        'idcontacto': 'ClientID',
-        'idcoldis': 'ProductID',
-        'idcoldis': 'Product',
-        'pallets': 'Pallets',
-        'dup_key': 'Label'
-
-    }, inplace=True)
-
-    # Display the final dataframe
-    print("\nFinal inventory dataframe:\n", final_df)
-
-    output_path = os.path.join(get_base_output_path(), 'final_inventory_dataframe.csv')
-    final_df.to_csv(output_path, index=False)
-
-    # -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-
-    # *** OUTFLOW CBM AND PALLETS ***
-
-    # Step 1: Drop rows with NaN or missing values for 'idmodelo' and 'idubica1' in saldo_inv_cliente_fact
-    saldo_clean = saldo_inv_cliente_fact.dropna(subset=['idmodelo', 'idubica1'])
-
-    # Step 2: Filter rows in 'saldo_inv_cliente_fact' where 'idubica1' is not blank, NaN, or starting with 'R'
-    filtered_saldo = saldo_clean[saldo_clean['idubica1'].notna() &
-                                 (saldo_clean['idubica1'] != '') &
-                                 ~saldo_clean['idubica1'].str.startswith('R')]
-
-    # Step 3: Group by 'idmodelo' and 'idubica1' to count occurrences in saldo_inv_cliente_fact
-    grouped_by_idubica1_saldo = filtered_saldo.groupby(['idmodelo', 'idubica1']).size().reset_index(name='count')
-
-    output_path = os.path.join(get_base_output_path(), 'grouped_by_idubica1_saldo.csv')
-    grouped_by_idubica1_saldo.to_csv(output_path, index=False)
-
-    # Step 4: Find the mode of the count for each 'idmodelo'
-    mode_grouping_saldo = grouped_by_idubica1_saldo.groupby('idmodelo')['count'].agg(lambda x: x.mode()[0]).reset_index(
-        name='mode_count')
-
-
-    # Step 5: Merge the mode count with the outflow data (resumen_despachos_cliente_fact) using 'idmodelo_x'
-    outflow_with_mode = pd.merge(resumen_despachos_cliente_fact, mode_grouping_saldo, left_on='idmodelo_x',
-                                 right_on='idmodelo', how='left')
-
-    # Step 6: Fill missing 'mode_count' with a default value (e.g., 1 if no grouping is available)
-    outflow_with_mode['mode_count'].fillna(1, inplace=True)
-
-    # Load the 'Unique Modes per Product - KC' data
-    unique_modes_file_path = \
-        r'\\192.168.10.18\gem\006 MORIBUS\ANALISIS y PROYECTOS\assets\inventory_analysis_client\pallet_mode_KC.xlsx'
-    unique_modes_df = pd.read_excel(unique_modes_file_path)
-
-    # Get the unique idmodelo
-    unique_modes_df['idmodelo'] = unique_modes_df[['idmodelo']].drop_duplicates()
-
-    # Ensure 'idmodelo' is a string
-    unique_modes_df['idmodelo'] = unique_modes_df['idmodelo'].astype(str).str.strip()
-
-    # Merge 'unique_modes_df' into 'outflow_with_mode' on 'idmodelo'
-    outflow_with_mode = pd.merge(
-        outflow_with_mode,
-        unique_modes_df[['idmodelo', 'mode_count']],
-        left_on='idmodelo_x',
-        right_on='idmodelo',
-        how='left',
-        suffixes=('_existing', '_new')
-    )
-
-    # Now, compare 'mode_count_existing' and 'mode_count_new', and if 'mode_count_new' > 'mode_count_existing', replace 'mode_count_existing' with 'mode_count_new'
-    # First, ensure 'mode_count_existing' and 'mode_count_new' are numeric
-    outflow_with_mode['mode_count_existing'] = pd.to_numeric(outflow_with_mode['mode_count_existing'], errors='coerce')
-    outflow_with_mode['mode_count_new'] = pd.to_numeric(outflow_with_mode['mode_count_new'], errors='coerce')
-
-    # Where 'mode_count_new' > 'mode_count_existing', replace 'mode_count_existing' with 'mode_count_new'
-    condition = outflow_with_mode['mode_count_new'] > outflow_with_mode['mode_count_existing']
-    outflow_with_mode.loc[condition, 'mode_count_existing'] = outflow_with_mode.loc[condition, 'mode_count_new']
-
-    # Now, drop 'mode_count_new' and rename 'mode_count_existing' back to 'mode_count'
-    outflow_with_mode.drop(columns=['mode_count_new', 'idmodelo_y'], inplace=True)
-    outflow_with_mode.rename(columns={'mode_count_existing': 'mode_count'}, inplace=True)
-
-    # Step 7: Calculate the number of rows per 'trannum' and 'idmodelo_x'
-    df_grouped_outflow = outflow_with_mode.groupby(['trannum', 'idmodelo_x']).size().reset_index(name='num_rows')
-
-    # Step 8: Merge the number of rows back into the outflow_with_mode dataframe
-    outflow_with_mode = pd.merge(outflow_with_mode, df_grouped_outflow, on=['trannum', 'idmodelo_x'], how='left')
-
-    # Ensure num_rows and mode_count are numeric
-    outflow_with_mode['num_rows'] = pd.to_numeric(outflow_with_mode['num_rows'], errors='coerce')
-    outflow_with_mode['mode_count'] = pd.to_numeric(outflow_with_mode['mode_count'], errors='coerce')
-
-    # Step 9: Calculate the number of pallets by dividing 'num_rows' by 'mode_count'
-    # Use np.ceil() to round up after the division
-    outflow_with_mode['pallets'] = np.ceil(outflow_with_mode['num_rows'] / outflow_with_mode['mode_count'])
-
-    # Step 10: Create a new column 'calculated_pallets' without rounding
-    outflow_with_mode['calculated_pallets'] = outflow_with_mode['num_rows'] / outflow_with_mode['mode_count']
-
-    # Step 11: Fill missing or NaN 'idubica1' as 1 pallet
-    outflow_with_mode.loc[outflow_with_mode['idubica1'].isna(), 'pallets'] = 1
-    outflow_with_mode.loc[outflow_with_mode['idubica1'] == '', 'pallets'] = 1
-
-    # Step 12: Round 'calculated_pallets' to the nearest integer
-    outflow_with_mode['calculated_pallets'] = np.ceil(outflow_with_mode['calculated_pallets'])
-
-    # Merge with registro_ingresos to get OC description.
-    outflow_with_mode = pd.merge(outflow_with_mode, registro_ingresos[['idingreso', 'descrip']], on='idingreso',
-                                 how="left")
-
-    # Drop duplicates based on 'dup_key'
-    outflow_with_mode = outflow_with_mode.drop_duplicates(subset='dup_key')
-
-    # Keep fecha_x and fecha_y as Timestamps
-    outflow_with_mode['fecha_x'] = pd.to_datetime(outflow_with_mode['fecha_x'])
-    outflow_with_mode['fecha_y'] = pd.to_datetime(outflow_with_mode['fecha_y'])
-
-    # Calculate the number of days
-    outflow_with_mode['Days'] = (outflow_with_mode['fecha_x'] - outflow_with_mode['fecha_y']).dt.days + 1
-
-    # Keep the historical df for further purposes.
-    outflow_with_mode_historical = outflow_with_mode
-
-    # Filter by date
-    outflow_with_mode = outflow_with_mode[
-        (outflow_with_mode['fecha_x'] >= start_date) &
-        (outflow_with_mode['fecha_x'] <= end_date)
-        ]
-
-    # Step 13: Group by 'trannum' and 'idmodelo_x' and perform the final aggregations
-    outflow_grouped = outflow_with_mode.groupby(['trannum', 'idmodelo_x']).agg({
-        'fecha_x': 'first',  # First occurrence of 'fecha_x'
-        'fecha_y': 'last',
-        'Days': 'mean',
-        'descrip': 'first',  # Purchase Order
-        'cantidad': 'sum',  # Sum of 'cantidad'
-        'pallets': 'first',
-        'pesokgs': 'sum',
-        'calculated_pallets': 'first',
-        'bodega': 'first',
-    }).reset_index()
-
-    # Round 'Days' to 2 decimal places
-    outflow_grouped['Days'] = outflow_grouped['Days'].round(2)
-
-    # Step 14: Drop the unnecessary columns
-    outflow_grouped = outflow_grouped.drop(columns=['pallets'])
-
-    # Step 15: Round 'calculated_pallets' to the nearest integer
-    outflow_grouped['calculated_pallets'] = np.ceil(outflow_grouped['calculated_pallets']).astype('Int64')
-
-    # Step 16: Rename columns for the final output
-    outflow_grouped.rename(columns={
-        'fecha_x': 'Shipping_Date',
-        'fecha_y': 'Arrival_Date',
-        'pesokgs': 'Weight or Units',
-        'calculated_pallets': 'Pallets',
-        'cantidad': 'CBM',
-        'idmodelo_x': 'idmodelo',
-        'descrip': 'Description',
-        'bodega': 'Warehouse'
-    }, inplace=True)
-
-    outflow_grouped = outflow_grouped.loc[:,['trannum', 'idmodelo', 'Arrival_Date', 'Shipping_Date', 'Days', 'Description', 'CBM', 'Pallets', 'Weight or Units',
-                                      'Warehouse']]
-
-    # Write the cleaned outflow data to CSV
-    output_path = os.path.join(get_base_output_path(), 'final_outflow_df_fact.csv')
-    outflow_grouped.to_csv(output_path, index=False)
-
-    output_path = os.path.join(get_base_output_path(), 'inflow_with_mode_historical.csv')
-    inflow_with_mode_historical.to_csv(output_path, index=False)
-    output_path = os.path.join(get_base_output_path(), 'outflow_with_mode_historical.csv')
-    outflow_with_mode_historical.to_csv(output_path, index=False)
-
-    output_path = os.path.join(get_base_output_path(), 'inflow_with_mode.csv')
-    inflow_with_mode.to_csv(output_path, index=False)
-    output_path = os.path.join(get_base_output_path(), 'outflow_with_mode.csv')
-    outflow_with_mode.to_csv(output_path, index=False)
-
-    output_path = os.path.join(get_base_output_path(), 'final_df.csv')
-    final_df.to_csv(output_path, index=False)
-
-
-    print("\nFinal Outflow DataFrame:\n", outflow_grouped)
-
-    total_inflow_pallets = inflow_grouped['Pallets'].sum()
-    total_inflow_cbm = inflow_grouped['CBM'].sum()
-
-    total_outflow_pallets = outflow_grouped['Pallets'].sum()
-    total_outflow_cbm = outflow_grouped['CBM'].sum()
-
-    total_pallets_inv = final_df['Pallets'].sum()
-    total_cbm_inventory = final_df['CBM'].sum()
+        # Fill NaNs in 'ddma' with empty strings
+        inflow_with_mode['ddma'] = inflow_with_mode['ddma'].fillna(0.0)
+
+        # # Print unique values of 'ddma' after filling NaNs
+        # print("Unique values in 'ddma' after fillna:")
+        # print(inflow_with_mode['ddma'].unique())
+
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
+
+        # Define a function to adjust the pallet count for each group
+        def adjust_pallets_final(group):
+            # Count the number of rows with 'ddma' > 0
+            num_splits = (group['ddma'] > 0).sum()
+
+            # Subtract the number of splits from the initial pallet count (applies to all rows in the group)
+            adjusted_pallets = group['pallets'].iloc[0] - num_splits
+
+            # Assign the adjusted value to 'pallets_final' for all rows in the group
+            group['pallets_final'] = adjusted_pallets
+
+            return group
+
+        # Group by 'idingreso' and 'idmodelo' and apply the adjustment function
+        inflow_with_mode = inflow_with_mode.groupby(['idingreso', 'idmodelo'], group_keys=False).apply(
+            adjust_pallets_final)
+
+        # Reset the index after applying the group operation to ensure grouping columns are retained
+        if 'idingreso' not in inflow_with_mode.columns or 'idmodelo' not in inflow_with_mode.columns:
+            inflow_with_mode = inflow_with_mode.reset_index()
+
+        # Ensure that the pallet count is not less than zero after adjustment
+        inflow_with_mode['pallets_final'] = inflow_with_mode['pallets_final'].clip(lower=0)
+
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
+
+        # Keep the historical df for further purposes.
+        inflow_with_mode_historical = inflow_with_mode
+
+        # Filter data within the date range
+        inflow_with_mode = inflow_with_mode[
+            (inflow_with_mode['fecha_x'] >= start_date) &
+            (inflow_with_mode['fecha_x'] <= end_date)
+            ]
+
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
+
+        # Step 3: Rename columns as needed
+        inflow_with_mode.rename(columns={
+            'fecha_x': 'Date',
+            'descrip': 'Description',
+            'Bodega': 'Warehouse',
+            'inicial': 'CBM',
+            'pesokgs': 'Weight or Units',
+            'pallets_final': 'Pallets'
+        }, inplace=True)
+
+        # Ensure 'idingreso' is not part of the index before performing groupby
+        if 'idingreso' in inflow_with_mode.index.names:
+            inflow_with_mode.reset_index(drop=True, inplace=True)
+
+            # Step:
+            time.sleep(1)  # Simulate a task
+            progress.update(task, advance=1)
+
+        # Step 4: Final grouping by 'idingreso' and 'idmodelo' to aggregate relevant columns
+        inflow_grouped = inflow_with_mode.groupby(['idingreso', 'idmodelo']).agg({
+            'Date': 'first',
+            'Description': 'first',
+            'CBM': 'sum',
+            'Pallets': 'min',
+            'Weight or Units': 'sum',
+            'Warehouse': 'first'
+
+        }).reset_index()
+
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
+
+        # print("\nFinal Inflow dataframe:\n", inflow_grouped)
+
+        # Final step: Write the cleaned outflow data to CSV or display as needed
+        output_path = os.path.join(get_base_output_path(), 'final_inflow_df_fact.csv')
+        inflow_grouped.to_csv(output_path, index=False)
+
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
+
+        # ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+        # *** ACTUAL INVENTORY DATAFRAME ***
+
+        # Step 1: Filter rows where 'idubica1' is not blank, not NaN, and does not start with 'R'
+        filtered_df = saldo_inv_cliente_fact[
+            saldo_inv_cliente_fact['idubica1'].notna() &  # Not NaN
+            (saldo_inv_cliente_fact['idubica1'] != '') &  # Not blank
+            ~saldo_inv_cliente_fact['idubica1'].str.startswith('R') &  # Does not start with 'R'
+            ~saldo_inv_cliente_fact['idubica1'].str.startswith('TM')  # Does not start with 'R'
+            ]
+
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
+
+        output_path = os.path.join(get_base_output_path(), 'saldo_inv_cliente_fact.csv')
+        saldo_inv_cliente_fact.to_csv(output_path, index=False)
+        output_path = os.path.join(get_base_output_path(), 'filtered_df.csv')
+        filtered_df.to_csv(output_path, index=False)
+
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
+
+        # Step 2: Create a 'pallets' column with value 1 for each row
+        filtered_df['pallets'] = 1
+
+        # Step 3: Group by 'idubica1' and aggregate columns
+        grouped_df = filtered_df.groupby('idubica1').agg({
+            'idcentro': 'first',
+            'idbodega': 'first',
+            'idingreso': 'first',
+            'itemno': 'last',
+            'idstatus': 'first',
+            'fecha': 'first',
+            'idcontacto': 'first',
+            'idubica': 'first',
+            'pesokgs': 'sum',  # Summing numerical columns
+            'inicial': 'sum',  # Summing 'inicial'
+            'salidas': 'sum',  # Summing 'salidas'
+            'bodega': 'first',
+            'dup_key': 'first',
+            'pallets': 'count'  # Summing 'pallets', which should now be 1 for each row
+        }).reset_index()
+
+        # Step 4: Get the rows where 'idubica1' is blank or starts with 'R'
+        remaining_df = saldo_inv_cliente_fact[
+            saldo_inv_cliente_fact['idubica1'].isna() |
+            (saldo_inv_cliente_fact['idubica1'] == '') |
+            saldo_inv_cliente_fact['idubica1'].str.startswith('R') &  # Does not start with 'R'
+            saldo_inv_cliente_fact['idubica1'].str.startswith('TM')  # Does not start with 'R'
+            ]
+
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
+
+        # Step 5: Assign 'pallets' = 1 for rows without 'idubica1' or starting with 'R'
+        remaining_df['pallets'] = 1
+
+        # Step 6: Concatenate the grouped rows with the remaining rows
+        final_df = pd.concat([grouped_df, remaining_df]).reset_index(drop=True)
+
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
+
+        # Step 7: Group by 'idingreso' and aggregate columns (final)
+        final_df = final_df.groupby('idingreso').agg({
+            'itemno': 'first',
+            'dup_key': 'first',
+            'fecha': 'first',
+            'idcontacto': 'first',
+            'idubica': 'first',
+            'inicial': 'sum',  # Summing 'inicial'
+            'pallets': 'count',
+            'pesokgs': 'sum',  # Summing numerical columns
+            'bodega': 'first',
+        }).reset_index()
+
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
+
+        # Add the 'Days' column that calculates the number of days from the 'Date' to the current date
+        final_df['fecha'] = pd.to_datetime(final_df['fecha']).dt.date
+        final_df['Days'] = (datetime.now().date() - pd.to_datetime(final_df['fecha']).dt.date).apply(
+            lambda x: x.days) + 1
+
+        final_df.rename(columns={
+            'fecha': 'Date',
+            'idubica': 'locationID',
+            'idubica1': 'Tarima',
+            'inicial': 'CBM',
+            'pesokgs': 'Weight or Units',
+            'bodega': 'Warehouse',
+            'idcontacto': 'ClientID',
+            'idcoldis': 'ProductID',
+            'pallets': 'Pallets',
+            'dup_key': 'Label'
+
+        }, inplace=True)
+
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
+
+        output_path = os.path.join(get_base_output_path(), 'final_inventory_dataframe.csv')
+        final_df.to_csv(output_path, index=False)
+
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
+
+        # -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+        # *** OUTFLOW CBM AND PALLETS ***
+
+        # Step 1: Drop rows with NaN or missing values for 'idmodelo' and 'idubica1' in saldo_inv_cliente_fact
+        saldo_clean = saldo_inv_cliente_fact.dropna(subset=['idmodelo', 'idubica1'])
+
+        # Step 2: Filter rows in 'saldo_inv_cliente_fact' where 'idubica1' is not blank, NaN, or starting with 'R'
+        filtered_saldo = saldo_clean[saldo_clean['idubica1'].notna() &
+                                     (saldo_clean['idubica1'] != '') &
+                                     ~saldo_clean['idubica1'].str.startswith('R') &  # Does not start with 'R'
+                                     ~saldo_inv_cliente_fact['idubica1'].str.startswith(
+                                         'TM')]  # Does not start with 'R'
+
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
+
+        # Step 3: Group by 'idmodelo' and 'idubica1' to count occurrences in saldo_inv_cliente_fact
+        grouped_by_idubica1_saldo = filtered_saldo.groupby(['idmodelo', 'idubica1']).size().reset_index(name='count')
+
+        output_path = os.path.join(get_base_output_path(), 'grouped_by_idubica1_saldo.csv')
+        grouped_by_idubica1_saldo.to_csv(output_path, index=False)
+
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
+
+        # Step 4: Find the mode of the count for each 'idmodelo'
+        mode_grouping_saldo = grouped_by_idubica1_saldo.groupby('idmodelo')['count'].agg(
+            lambda x: x.mode()[0]).reset_index(
+            name='mode_count')
+
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
+
+        # Step 5: Merge the mode count with the outflow data (resumen_despachos_cliente_fact) using 'idmodelo_x'
+        outflow_with_mode = pd.merge(resumen_despachos_cliente_fact, mode_grouping_saldo, left_on='idmodelo_x',
+                                     right_on='idmodelo', how='left')
+
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
+
+        # Step 6: Fill missing 'mode_count' with a default value (e.g., 1 if no grouping is available)
+        outflow_with_mode['mode_count'].fillna(1, inplace=True)
+
+        # Load the 'Unique Modes per Product - KC' data
+        unique_modes_file_path = \
+            r'\\192.168.10.18\gem\006 MORIBUS\ANALISIS y PROYECTOS\assets\inventory_analysis_client\pallet_mode_KC.xlsx'
+        unique_modes_df = pd.read_excel(unique_modes_file_path)
+
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
+
+        # Get the unique idmodelo
+        unique_modes_df['idmodelo'] = unique_modes_df[['idmodelo']].drop_duplicates()
+
+        # Ensure 'idmodelo' is a string
+        unique_modes_df['idmodelo'] = unique_modes_df['idmodelo'].astype(str).str.strip()
+
+        # Merge 'unique_modes_df' into 'outflow_with_mode' on 'idmodelo'
+        outflow_with_mode = pd.merge(
+            outflow_with_mode,
+            unique_modes_df[['idmodelo', 'mode_count']],
+            left_on='idmodelo_x',
+            right_on='idmodelo',
+            how='left',
+            suffixes=('_existing', '_new')
+        )
+
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
+
+        # Now, compare 'mode_count_existing' and 'mode_count_new', and if 'mode_count_new' > 'mode_count_existing', replace 'mode_count_existing' with 'mode_count_new'
+        # First, ensure 'mode_count_existing' and 'mode_count_new' are numeric
+        outflow_with_mode['mode_count_existing'] = pd.to_numeric(outflow_with_mode['mode_count_existing'],
+                                                                 errors='coerce')
+        outflow_with_mode['mode_count_new'] = pd.to_numeric(outflow_with_mode['mode_count_new'], errors='coerce')
+
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
+
+        # Where 'mode_count_new' > 'mode_count_existing', replace 'mode_count_existing' with 'mode_count_new'
+        condition = outflow_with_mode['mode_count_new'] > outflow_with_mode['mode_count_existing']
+        outflow_with_mode.loc[condition, 'mode_count_existing'] = outflow_with_mode.loc[condition, 'mode_count_new']
+
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
+
+        # Now, drop 'mode_count_new' and rename 'mode_count_existing' back to 'mode_count'
+        outflow_with_mode.drop(columns=['mode_count_new', 'idmodelo_y'], inplace=True)
+        outflow_with_mode.rename(columns={'mode_count_existing': 'mode_count'}, inplace=True)
+
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
+
+        # Step 7: Calculate the number of rows per 'trannum' and 'idmodelo_x'
+        df_grouped_outflow = outflow_with_mode.groupby(['trannum', 'idmodelo_x']).size().reset_index(name='num_rows')
+
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
+
+        # Step 8: Merge the number of rows back into the outflow_with_mode dataframe
+        outflow_with_mode = pd.merge(outflow_with_mode, df_grouped_outflow, on=['trannum', 'idmodelo_x'], how='left')
+
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
+
+        # Ensure num_rows and mode_count are numeric
+        outflow_with_mode['num_rows'] = pd.to_numeric(outflow_with_mode['num_rows'], errors='coerce')
+        outflow_with_mode['mode_count'] = pd.to_numeric(outflow_with_mode['mode_count'], errors='coerce')
+
+        # Step 9: Calculate the number of pallets by dividing 'num_rows' by 'mode_count'
+        # Use np.ceil() to round up after the division
+        outflow_with_mode['pallets'] = np.ceil(outflow_with_mode['num_rows'] / outflow_with_mode['mode_count'])
+
+        # Step 10: Create a new column 'calculated_pallets' without rounding
+        outflow_with_mode['calculated_pallets'] = outflow_with_mode['num_rows'] / outflow_with_mode['mode_count']
+
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
+
+        # Step 11: Fill missing or NaN 'idubica1' as 1 pallet
+        outflow_with_mode.loc[outflow_with_mode['idubica1'].isna(), 'pallets'] = 1
+        outflow_with_mode.loc[outflow_with_mode['idubica1'] == '', 'pallets'] = 1
+
+        # Step 12: Round 'calculated_pallets' to the nearest integer
+        outflow_with_mode['calculated_pallets'] = np.ceil(outflow_with_mode['calculated_pallets'])
+
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
+
+        # Merge with registro_ingresos to get OC description.
+        outflow_with_mode = pd.merge(outflow_with_mode, registro_ingresos[['idingreso', 'descrip']], on='idingreso',
+                                     how="left")
+
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
+
+        # Drop duplicates based on 'dup_key'
+        outflow_with_mode = outflow_with_mode.drop_duplicates(subset='dup_key')
+
+        # Keep fecha_x and fecha_y as Timestamps
+        outflow_with_mode['fecha_x'] = pd.to_datetime(outflow_with_mode['fecha_x'])
+        outflow_with_mode['fecha_y'] = pd.to_datetime(outflow_with_mode['fecha_y'])
+
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
+
+        # Calculate the number of days
+        outflow_with_mode['Days'] = (outflow_with_mode['fecha_x'] - outflow_with_mode['fecha_y']).dt.days + 1
+
+        # Keep the historical df for further purposes.
+        outflow_with_mode_historical = outflow_with_mode
+
+        # Filter by date
+        outflow_with_mode = outflow_with_mode[
+            (outflow_with_mode['fecha_x'] >= start_date) &
+            (outflow_with_mode['fecha_x'] <= end_date)
+            ]
+
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
+
+        # Step 13: Group by 'trannum' and 'idmodelo_x' and perform the final aggregations
+        outflow_grouped = outflow_with_mode.groupby(['trannum', 'idmodelo_x']).agg({
+            'fecha_x': 'first',  # First occurrence of 'fecha_x'
+            'fecha_y': 'last',
+            'Days': 'mean',
+            'descrip': 'first',  # Purchase Order
+            'cantidad': 'sum',  # Sum of 'cantidad'
+            'pallets': 'first',
+            'pesokgs': 'sum',
+            'calculated_pallets': 'first',
+            'bodega': 'first',
+        }).reset_index()
+
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
+
+        # Round 'Days' to 2 decimal places
+        outflow_grouped['Days'] = outflow_grouped['Days'].round(2)
+
+        # Step 14: Drop the unnecessary columns
+        outflow_grouped = outflow_grouped.drop(columns=['pallets'])
+
+        # Step 15: Round 'calculated_pallets' to the nearest integer
+        outflow_grouped['calculated_pallets'] = np.ceil(outflow_grouped['calculated_pallets']).astype('Int64')
+
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
+
+        # Step 16: Rename columns for the final output
+        outflow_grouped.rename(columns={
+            'fecha_x': 'Shipping_Date',
+            'fecha_y': 'Arrival_Date',
+            'pesokgs': 'Weight or Units',
+            'calculated_pallets': 'Pallets',
+            'cantidad': 'CBM',
+            'idmodelo_x': 'idmodelo',
+            'descrip': 'Description',
+            'bodega': 'Warehouse'
+        }, inplace=True)
+
+        outflow_grouped = outflow_grouped.loc[:,
+                          ['trannum', 'idmodelo', 'Arrival_Date', 'Shipping_Date', 'Days', 'Description', 'CBM',
+                           'Pallets',
+                           'Weight or Units',
+                           'Warehouse']]
+
+        # Write the cleaned outflow data to CSV
+        output_path = os.path.join(get_base_output_path(), 'final_outflow_df_fact.csv')
+        outflow_grouped.to_csv(output_path, index=False)
+
+        output_path = os.path.join(get_base_output_path(), 'inflow_with_mode_historical.csv')
+        inflow_with_mode_historical.to_csv(output_path, index=False)
+        output_path = os.path.join(get_base_output_path(), 'outflow_with_mode_historical.csv')
+        outflow_with_mode_historical.to_csv(output_path, index=False)
+
+        output_path = os.path.join(get_base_output_path(), 'inflow_with_mode.csv')
+        inflow_with_mode.to_csv(output_path, index=False)
+        output_path = os.path.join(get_base_output_path(), 'outflow_with_mode.csv')
+        outflow_with_mode.to_csv(output_path, index=False)
+
+        output_path = os.path.join(get_base_output_path(), 'final_df.csv')
+        final_df.to_csv(output_path, index=False)
+
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
+
+        total_inflow_pallets = inflow_grouped['Pallets'].sum()
+        total_inflow_cbm = inflow_grouped['CBM'].sum()
+
+        total_outflow_pallets = outflow_grouped['Pallets'].sum()
+        total_outflow_cbm = outflow_grouped['CBM'].sum()
+
+        total_pallets_inv = final_df['Pallets'].sum()
+        total_cbm_inventory = final_df['CBM'].sum()
+
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
     print("\n Total Pallets and CBM count:\n")
     print("Pallets received:\n", total_inflow_pallets)
@@ -1705,224 +2101,343 @@ def billing_data_reconstruction(saldo_inv_cliente_fact, resumen_mensual_ingresos
     print("Pallets on inventory - Actual:\n", total_pallets_inv)
     print("CBM on inventory - Actual:\n", total_cbm_inventory)
 
+    # Display the final dataframes
+    print("\nFinal Inflow dataframe:\n", inflow_grouped)
+    print("\nFinal Outflow DataFrame:\n", outflow_grouped)
+    print("\nFinal inventory dataframe:\n", final_df)
+
+    print("Clients Operational data reconstructed successfully.\n")
+
     return inflow_with_mode_historical, outflow_with_mode_historical, final_df
-
-# def days_period(registro_salidas,dispatched_inventory):
-#
-#     output_path = os.path.join(get_base_output_path(), 'registro_salidas.csv')
-#     registro_salidas.to_csv(output_path, index=True)
-#     output_path = os.path.join(get_base_output_path(), 'dispatched_inventory.csv')
-#     dispatched_inventory.to_csv(output_path, index=True)
-
 
 
 def inventory_proportions_by_product(saldo_inventory, supplier_info):
-    print("\n*** Actual Inventory Proportion Analysis ***\n")
-    # Leer los datos especificando los tipos de datos
-    if os.name == 'nt':
-        inmodelo_clasificacion = pd.read_excel(
-            r'\\192.168.10.18\gem\006 MORIBUS\ANALISIS y PROYECTOS\varios\modelos_clasificacion.xlsx')
-    else:
-        inmodelo_clasificacion = pd.read_excel(
-            r'/Users/j.m./Library/Mobile Documents/com~apple~CloudDocs/GM/MOBU - OPL/varios/modelos_clasificacion.xlsx')
+    with Progress() as progress:
+        # Add a task with a total number of steps
+        task = progress.add_task("[green]Clustering Clients inventory data: ", total=14)
+        # Leer los datos especificando los tipos de datos
+        if os.name == 'nt':
+            inmodelo_clasificacion = pd.read_excel(
+                r'\\192.168.10.18\gem\006 MORIBUS\ANALISIS y PROYECTOS\varios\modelos_clasificacion.xlsx')
+        else:
+            inmodelo_clasificacion = pd.read_excel(
+                r'/Users/j.m./Library/Mobile Documents/com~apple~CloudDocs/GM/MOBU - '
+                r'OPL/varios/modelos_clasificacion.xlsx')
 
-    # print("Saldo inventory:\n", saldo_inventory)
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    saldo_inventory = saldo_inventory[saldo_inventory['idstatus'] == '01']
+        saldo_inventory = saldo_inventory[saldo_inventory['idstatus'] == '01']
 
-    saldo_inventory['fecha'] = pd.to_datetime(saldo_inventory['fecha'])
-    # Ordenar fechas de más reciente a más antiguas
-    saldo_inventory = saldo_inventory.sort_values(by='fecha', ascending=False)
+        saldo_inventory['fecha'] = pd.to_datetime(saldo_inventory['fecha'])
+        # Ordenar fechas de más reciente a más antiguas
+        saldo_inventory = saldo_inventory.sort_values(by='fecha', ascending=False)
 
-    # Asegurar que la columna 'idubica' y 'idmodelo' sea de tipo string
-    saldo_inventory['idubica'].astype(str)
-    saldo_inventory['idmodelo'].astype(str)
-    saldo_inventory['inicial'] = pd.to_numeric(saldo_inventory['inicial'], errors='coerce')
-    saldo_inventory['salidas'] = pd.to_numeric(saldo_inventory['salidas'], errors='coerce')
-    saldo_inventory['pesokgs'] = pd.to_numeric(saldo_inventory['pesokgs'], errors='coerce')
-    inmodelo_clasificacion['idmodelo'].astype(str)
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    # Eliminar espacios en blanco de los valores
-    saldo_inventory['idmodelo'].str.strip()
-    inmodelo_clasificacion['idmodelo'].str.strip()
+        # Asegurar que la columna 'idubica' y 'idmodelo' sea de tipo string
+        saldo_inventory['idubica'].astype(str)
+        saldo_inventory['idmodelo'].astype(str)
+        saldo_inventory['inicial'] = pd.to_numeric(saldo_inventory['inicial'], errors='coerce')
+        saldo_inventory['salidas'] = pd.to_numeric(saldo_inventory['salidas'], errors='coerce')
+        saldo_inventory['pesokgs'] = pd.to_numeric(saldo_inventory['pesokgs'], errors='coerce')
+        inmodelo_clasificacion['idmodelo'].astype(str)
 
-    # Asegurar que las columnas sean de tipo string y eliminar espacios en blanco
-    saldo_inventory['idmodelo'] = saldo_inventory['idmodelo'].astype(str).str.strip()
-    inmodelo_clasificacion['idmodelo'] = inmodelo_clasificacion['idmodelo'].astype(str).str.strip()
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    saldo_inventory = pd.merge(saldo_inventory, inmodelo_clasificacion, how='left', on='idmodelo')
+        # Eliminar espacios en blanco de los valores
+        saldo_inventory['idmodelo'].str.strip()
+        inmodelo_clasificacion['idmodelo'].str.strip()
 
-    # Update 'inicial' with values from 'cubicaje' where 'cubicaje' is not NaN
-    saldo_inventory.loc[saldo_inventory['cubicaje'].notna(), 'inicial'] = saldo_inventory['cubicaje']
+        # Asegurar que las columnas sean de tipo string y eliminar espacios en blanco
+        saldo_inventory['idmodelo'] = saldo_inventory['idmodelo'].astype(str).str.strip()
+        inmodelo_clasificacion['idmodelo'] = inmodelo_clasificacion['idmodelo'].astype(str).str.strip()
 
-    # Drop the specified columns
-    saldo_inventory = saldo_inventory.drop(columns=['descrip', 'clasificacion', 'cubicaje'])
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    # print("\nVolume - by client:\n", saldo_inventory)
+        saldo_inventory = pd.merge(saldo_inventory, inmodelo_clasificacion, how='left', on='idmodelo')
 
-    output_path = os.path.join(get_base_output_path(), 'insaldo_para_capacidad.csv')
-    saldo_inventory.to_csv(output_path, index=True)
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    # Determine the maximum length of 'idcontacto' values in both DataFrames
-    max_length = max(saldo_inventory['idcontacto'].str.len().max(),
-                     supplier_info['idcontacto'].str.len().max())
+        # Update 'inicial' with values from 'cubicaje' where 'cubicaje' is not NaN
+        saldo_inventory.loc[saldo_inventory['cubicaje'].notna(), 'inicial'] = saldo_inventory['cubicaje']
 
-    # Pad 'idcontacto' values with leading zeros to match the maximum length
-    saldo_inventory.loc[:, 'idcontacto'] = saldo_inventory['idcontacto'].str.zfill(max_length)
-    supplier_info['idcontacto'] = supplier_info['idcontacto'].str.zfill(max_length)
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    saldo_inventory['dup_key'] = (saldo_inventory['idingreso'] +
-                                  saldo_inventory['itemno'])
+        # Drop the specified columns
+        saldo_inventory = saldo_inventory.drop(columns=['descrip', 'clasificacion', 'cubicaje'])
 
-    saldo_inventory = saldo_inventory.drop_duplicates(subset='dup_key', keep='first')
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    saldo_inventory_grouped = saldo_inventory.groupby([
-        'idmodelo'
-    ]).agg({'idcoldis': 'first', 'inicial': 'sum',
-            'pesokgs': 'sum', 'itemno': 'count'}).reset_index()
+        # Determine the maximum length of 'idcontacto' values in both DataFrames
+        max_length = max(saldo_inventory['idcontacto'].str.len().max(),
+                         supplier_info['idcontacto'].str.len().max())
 
-    # Rename the columns
-    saldo_inventory_grouped.rename(columns={
-        'pesokgs': 'Units',
-        'inicial': 'CBM',
-        'idmodelo': 'ProductID',
-        'itemno': 'Pallets',
-    }, inplace=True)
+        # Pad 'idcontacto' values with leading zeros to match the maximum length
+        saldo_inventory.loc[:, 'idcontacto'] = saldo_inventory['idcontacto'].str.zfill(max_length)
+        supplier_info['idcontacto'] = supplier_info['idcontacto'].str.zfill(max_length)
 
-    saldo_inventory_grouped['CBM'] = pd.to_numeric(saldo_inventory_grouped['CBM'], errors='coerce')
-    saldo_inventory_grouped['Pallets'] = pd.to_numeric(saldo_inventory_grouped['Pallets'], errors='coerce')
-    saldo_inventory_grouped['Units'] = pd.to_numeric(saldo_inventory_grouped['Units'], errors='coerce')
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    # Calculate the total CBM, pallets, and units for the whole inventory
-    total_cbm = saldo_inventory_grouped['CBM'].sum()
-    total_pallets = saldo_inventory_grouped['Pallets'].sum()
-    total_units = saldo_inventory_grouped['Units'].sum()
+        saldo_inventory['dup_key'] = (saldo_inventory['idingreso'] +
+                                      saldo_inventory['itemno'])
 
-    total_cbm = pd.to_numeric(total_cbm, errors='coerce')
-    total_pallets = pd.to_numeric(total_pallets, errors='coerce')
-    total_units = pd.to_numeric(total_units, errors='coerce')
+        saldo_inventory = saldo_inventory.drop_duplicates(subset='dup_key', keep='first')
 
-    # Add percentage columns
-    saldo_inventory_grouped['CBM %'] = (saldo_inventory_grouped['CBM'] / total_cbm) * 100
-    saldo_inventory_grouped['Pallets %'] = (saldo_inventory_grouped['Pallets'] / total_pallets) * 100
-    saldo_inventory_grouped['units %'] = (saldo_inventory_grouped['Units'] / total_units) * 100
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    saldo_inventory_grouped = saldo_inventory_grouped.sort_values(by='CBM %', ascending=False)
+        saldo_inventory_grouped = saldo_inventory.groupby([
+            'idmodelo'
+        ]).agg({'idcoldis': 'first', 'inicial': 'sum',
+                'pesokgs': 'sum', 'itemno': 'count'}).reset_index()
 
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
+
+        # Rename the columns
+        saldo_inventory_grouped.rename(columns={
+            'pesokgs': 'Units',
+            'inicial': 'CBM',
+            'idmodelo': 'ProductID',
+            'itemno': 'Pallets',
+        }, inplace=True)
+
+        saldo_inventory_grouped['CBM'] = pd.to_numeric(saldo_inventory_grouped['CBM'], errors='coerce')
+        saldo_inventory_grouped['Pallets'] = pd.to_numeric(saldo_inventory_grouped['Pallets'], errors='coerce')
+        saldo_inventory_grouped['Units'] = pd.to_numeric(saldo_inventory_grouped['Units'], errors='coerce')
+
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
+
+        # Calculate the total CBM, pallets, and units for the whole inventory
+        total_cbm = saldo_inventory_grouped['CBM'].sum()
+        total_pallets = saldo_inventory_grouped['Pallets'].sum()
+        total_units = saldo_inventory_grouped['Units'].sum()
+
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
+
+        total_cbm = pd.to_numeric(total_cbm, errors='coerce')
+        total_pallets = pd.to_numeric(total_pallets, errors='coerce')
+        total_units = pd.to_numeric(total_units, errors='coerce')
+
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
+
+        # Add percentage columns
+        saldo_inventory_grouped['CBM %'] = (saldo_inventory_grouped['CBM'] / total_cbm) * 100
+        saldo_inventory_grouped['Pallets %'] = (saldo_inventory_grouped['Pallets'] / total_pallets) * 100
+        saldo_inventory_grouped['units %'] = (saldo_inventory_grouped['Units'] / total_units) * 100
+
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
+
+        saldo_inventory_grouped = saldo_inventory_grouped.sort_values(by='CBM %', ascending=False)
+
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
     print("\nActual Client inventory proportions to date:\n", saldo_inventory_grouped)
+    print("Clustering process complete.\n")
 
 
 def inventory_oldest_products(saldo_inventory, supplier_info):
-    print("\n*** Actual Inventory by date received ***\n")
-    # Leer los datos especificando los tipos de datos
-    if os.name == 'nt':
-        inmodelo_clasificacion = pd.read_excel(
-            r'\\192.168.10.18\gem\006 MORIBUS\ANALISIS y PROYECTOS\varios\modelos_clasificacion.xlsx')
-    else:
-        inmodelo_clasificacion = pd.read_excel(
-            r'/Users/j.m./Library/Mobile Documents/com~apple~CloudDocs/GM/MOBU - OPL/varios/modelos_clasificacion.xlsx')
+    with Progress() as progress:
+        # Add a new task
+        task = progress.add_task("[green]Analyzing days on hand: ", total=5)
+        # Leer los datos especificando los tipos de datos
+        if os.name == 'nt':
+            inmodelo_clasificacion = pd.read_excel(
+                r'\\192.168.10.18\gem\006 MORIBUS\ANALISIS y PROYECTOS\varios\modelos_clasificacion.xlsx')
+        else:
+            inmodelo_clasificacion = pd.read_excel(
+                r'/Users/j.m./Library/Mobile Documents/com~apple~CloudDocs/GM/MOBU - OPL/varios/modelos_clasificacion.xlsx')
 
-    # print("Saldo inventory:\n", saldo_inventory)
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    saldo_inventory = saldo_inventory[saldo_inventory['idstatus'] == '01']
+        saldo_inventory = saldo_inventory[saldo_inventory['idstatus'] == '01']
 
-    saldo_inventory['fecha'] = pd.to_datetime(saldo_inventory['fecha']).dt.date
+        saldo_inventory['fecha'] = pd.to_datetime(saldo_inventory['fecha']).dt.date
 
-    # Ordenar fechas de más reciente a más antiguas
-    saldo_inventory = saldo_inventory.sort_values(by='fecha', ascending=False)
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    # Asegurar que la columna 'idubica' y 'idmodelo' sea de tipo string
-    saldo_inventory['idubica'].astype(str)
-    saldo_inventory['idmodelo'].astype(str)
-    saldo_inventory['inicial'] = pd.to_numeric(saldo_inventory['inicial'], errors='coerce')
-    saldo_inventory['salidas'] = pd.to_numeric(saldo_inventory['salidas'], errors='coerce')
-    saldo_inventory['pesokgs'] = pd.to_numeric(saldo_inventory['pesokgs'], errors='coerce')
-    inmodelo_clasificacion['idmodelo'].astype(str)
+        # Ordenar fechas de más reciente a más antiguas
+        saldo_inventory = saldo_inventory.sort_values(by='fecha', ascending=False)
 
-    # Eliminar espacios en blanco de los valores
-    saldo_inventory['idmodelo'].str.strip()
-    inmodelo_clasificacion['idmodelo'].str.strip()
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    # Asegurar que las columnas sean de tipo string y eliminar espacios en blanco
-    saldo_inventory['idmodelo'] = saldo_inventory['idmodelo'].astype(str).str.strip()
-    inmodelo_clasificacion['idmodelo'] = inmodelo_clasificacion['idmodelo'].astype(str).str.strip()
+        # Asegurar que la columna 'idubica' y 'idmodelo' sea de tipo string
+        saldo_inventory['idubica'].astype(str)
+        saldo_inventory['idmodelo'].astype(str)
+        saldo_inventory['inicial'] = pd.to_numeric(saldo_inventory['inicial'], errors='coerce')
+        saldo_inventory['salidas'] = pd.to_numeric(saldo_inventory['salidas'], errors='coerce')
+        saldo_inventory['pesokgs'] = pd.to_numeric(saldo_inventory['pesokgs'], errors='coerce')
+        inmodelo_clasificacion['idmodelo'].astype(str)
 
-    saldo_inventory = pd.merge(saldo_inventory, inmodelo_clasificacion, how='left', on='idmodelo')
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    # Update 'inicial' with values from 'cubicaje' where 'cubicaje' is not NaN
-    saldo_inventory.loc[saldo_inventory['cubicaje'].notna(), 'inicial'] = saldo_inventory['cubicaje']
+        # Eliminar espacios en blanco de los valores
+        saldo_inventory['idmodelo'].str.strip()
+        inmodelo_clasificacion['idmodelo'].str.strip()
 
-    # Drop the specified columns
-    saldo_inventory = saldo_inventory.drop(columns=['descrip', 'clasificacion', 'cubicaje'])
+        # Asegurar que las columnas sean de tipo string y eliminar espacios en blanco
+        saldo_inventory['idmodelo'] = saldo_inventory['idmodelo'].astype(str).str.strip()
+        inmodelo_clasificacion['idmodelo'] = inmodelo_clasificacion['idmodelo'].astype(str).str.strip()
 
-    # print("\nVolume - by client:\n", saldo_inventory)
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    output_path = os.path.join(get_base_output_path(), 'insaldo_para_capacidad.csv')
-    saldo_inventory.to_csv(output_path, index=True)
+        saldo_inventory = pd.merge(saldo_inventory, inmodelo_clasificacion, how='left', on='idmodelo')
 
-    # Determine the maximum length of 'idcontacto' values in both DataFrames
-    max_length = max(saldo_inventory['idcontacto'].str.len().max(),
-                     supplier_info['idcontacto'].str.len().max())
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    # Pad 'idcontacto' values with leading zeros to match the maximum length
-    saldo_inventory.loc[:, 'idcontacto'] = saldo_inventory['idcontacto'].str.zfill(max_length)
-    supplier_info['idcontacto'] = supplier_info['idcontacto'].str.zfill(max_length)
+        # Update 'inicial' with values from 'cubicaje' where 'cubicaje' is not NaN
+        saldo_inventory.loc[saldo_inventory['cubicaje'].notna(), 'inicial'] = saldo_inventory['cubicaje']
 
-    saldo_inventory['dup_key'] = (saldo_inventory['idingreso'] +
-                                  saldo_inventory['itemno'])
+        # Drop the specified columns
+        saldo_inventory = saldo_inventory.drop(columns=['descrip', 'clasificacion', 'cubicaje'])
 
-    saldo_inventory = saldo_inventory.drop_duplicates(subset='dup_key', keep='first')
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    saldo_inventory_grouped = saldo_inventory.groupby([
-        'fecha'
-    ]).agg({'idcoldis': 'first', 'inicial': 'sum',
-            'pesokgs': 'sum', 'itemno': 'count'}).reset_index()
+        # Determine the maximum length of 'idcontacto' values in both DataFrames
+        max_length = max(saldo_inventory['idcontacto'].str.len().max(),
+                         supplier_info['idcontacto'].str.len().max())
 
-    # Rename the columns
-    saldo_inventory_grouped.rename(columns={
-        'fecha': 'Date',
-        'pesokgs': 'Units',
-        'inicial': 'CBM',
-        'idmodelo': 'ProductID',
-        'itemno': 'Pallets',
-    }, inplace=True)
+        # Pad 'idcontacto' values with leading zeros to match the maximum length
+        saldo_inventory.loc[:, 'idcontacto'] = saldo_inventory['idcontacto'].str.zfill(max_length)
+        supplier_info['idcontacto'] = supplier_info['idcontacto'].str.zfill(max_length)
 
-    saldo_inventory_grouped['CBM'] = pd.to_numeric(saldo_inventory_grouped['CBM'], errors='coerce')
-    saldo_inventory_grouped['Pallets'] = pd.to_numeric(saldo_inventory_grouped['Pallets'], errors='coerce')
-    saldo_inventory_grouped['Units'] = pd.to_numeric(saldo_inventory_grouped['Units'], errors='coerce')
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    # Calculate the total CBM, pallets, and units for the whole inventory
-    total_cbm = saldo_inventory_grouped['CBM'].sum()
-    total_pallets = saldo_inventory_grouped['Pallets'].sum()
-    total_units = saldo_inventory_grouped['Units'].sum()
+        saldo_inventory['dup_key'] = (saldo_inventory['idingreso'] +
+                                      saldo_inventory['itemno'])
 
-    total_cbm = pd.to_numeric(total_cbm, errors='coerce')
-    total_pallets = pd.to_numeric(total_pallets, errors='coerce')
-    total_units = pd.to_numeric(total_units, errors='coerce')
+        saldo_inventory = saldo_inventory.drop_duplicates(subset='dup_key', keep='first')
 
-    # Add percentage columns
-    saldo_inventory_grouped['CBM %'] = (saldo_inventory_grouped['CBM'] / total_cbm) * 100
-    saldo_inventory_grouped['Pallets %'] = (saldo_inventory_grouped['Pallets'] / total_pallets) * 100
-    saldo_inventory_grouped['units %'] = (saldo_inventory_grouped['Units'] / total_units) * 100
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    # Convert current date to pandas Timestamp
-    current_date = pd.Timestamp(datetime.now())
+        saldo_inventory_grouped = saldo_inventory.groupby([
+            'fecha'
+        ]).agg({'idcoldis': 'first', 'inicial': 'sum',
+                'pesokgs': 'sum', 'itemno': 'count'}).reset_index()
 
-    # Ensure the 'Date' column is of type datetime (just in case)
-    saldo_inventory_grouped['Date'] = pd.to_datetime(saldo_inventory_grouped['Date'])
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    # Calculate 'days_in_inventory'
-    saldo_inventory_grouped['Days in inventory'] = (current_date - saldo_inventory_grouped['Date']).dt.days
+        # Rename the columns
+        saldo_inventory_grouped.rename(columns={
+            'fecha': 'Date',
+            'pesokgs': 'Units',
+            'inicial': 'CBM',
+            'idmodelo': 'ProductID',
+            'itemno': 'Pallets',
+        }, inplace=True)
 
-    # Reorder columns to move 'days_in_inventory' next to 'Date'
-    cols = ['Date', 'Days in inventory'] + [col for col in saldo_inventory_grouped.columns if
-                                            col not in ['Date', 'Days in inventory']]
-    saldo_inventory_grouped = saldo_inventory_grouped[cols]
+        saldo_inventory_grouped['CBM'] = pd.to_numeric(saldo_inventory_grouped['CBM'], errors='coerce')
+        saldo_inventory_grouped['Pallets'] = pd.to_numeric(saldo_inventory_grouped['Pallets'], errors='coerce')
+        saldo_inventory_grouped['Units'] = pd.to_numeric(saldo_inventory_grouped['Units'], errors='coerce')
 
-    # Sort by date (oldest first)
-    saldo_inventory_grouped = saldo_inventory_grouped.sort_values(by='Date', ascending=True)
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
+
+        # Calculate the total CBM, pallets, and units for the whole inventory
+        total_cbm = saldo_inventory_grouped['CBM'].sum()
+        total_pallets = saldo_inventory_grouped['Pallets'].sum()
+        total_units = saldo_inventory_grouped['Units'].sum()
+
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
+
+        total_cbm = pd.to_numeric(total_cbm, errors='coerce')
+        total_pallets = pd.to_numeric(total_pallets, errors='coerce')
+        total_units = pd.to_numeric(total_units, errors='coerce')
+
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
+
+        # Add percentage columns
+        saldo_inventory_grouped['CBM %'] = (saldo_inventory_grouped['CBM'] / total_cbm) * 100
+        saldo_inventory_grouped['Pallets %'] = (saldo_inventory_grouped['Pallets'] / total_pallets) * 100
+        saldo_inventory_grouped['units %'] = (saldo_inventory_grouped['Units'] / total_units) * 100
+
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
+
+        # Convert current date to pandas Timestamp
+        current_date = pd.Timestamp(datetime.now())
+
+        # Ensure the 'Date' column is of type datetime (just in case)
+        saldo_inventory_grouped['Date'] = pd.to_datetime(saldo_inventory_grouped['Date'])
+
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
+
+        # Calculate 'days_in_inventory'
+        saldo_inventory_grouped['Days in inventory'] = (current_date - saldo_inventory_grouped['Date']).dt.days
+
+        # Reorder columns to move 'days_in_inventory' next to 'Date'
+        cols = ['Date', 'Days in inventory'] + [col for col in saldo_inventory_grouped.columns if
+                                                col not in ['Date', 'Days in inventory']]
+        saldo_inventory_grouped = saldo_inventory_grouped[cols]
+
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
+
+        # Sort by date (oldest first)
+        saldo_inventory_grouped = saldo_inventory_grouped.sort_values(by='Date', ascending=True)
+
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
     print("\nActual Client inventory oldest products:\n", saldo_inventory_grouped)
+    print("Days on hand analysis complete.\n")
 
 
 def reconstruct_inventory_over_time(
@@ -1932,275 +2447,359 @@ def reconstruct_inventory_over_time(
         end_date=None,
         initial_inventory=None
 ):
+    with Progress() as progress:
+        # Add a new task
+        task = progress.add_task("[green]Reconstructing inventory behavior Data: ", total=20)
 
-    # Step 1: Create the 'dup_key' column for identifying duplicates
-    # Ensure 'idingreso' and 'itemno' are strings
-    inflow_with_mode_historical['idingreso'] = inflow_with_mode_historical['idingreso'].astype(str)
-    inflow_with_mode_historical['itemno'] = inflow_with_mode_historical['itemno'].astype(str)
+        # Ensure 'idingreso' and 'itemno' are strings
+        inflow_with_mode_historical['idingreso'] = inflow_with_mode_historical['idingreso'].astype(str)
+        inflow_with_mode_historical['itemno'] = inflow_with_mode_historical['itemno'].astype(str)
 
-    # Create 'dup_key' in resumen_mensual_ingresos_sd
-    inflow_with_mode_historical['dup_key'] = inflow_with_mode_historical['idingreso'] + inflow_with_mode_historical[
-        'itemno']
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    # Do the same for outflow_with_mode_historical if 'idingreso' and 'itemno_x' exist
-    if 'idingreso' in outflow_with_mode_historical.columns and 'itemno' in outflow_with_mode_historical.columns:
-        outflow_with_mode_historical['idingreso'] = outflow_with_mode_historical['idingreso'].astype(str)
-        outflow_with_mode_historical['itemno'] = outflow_with_mode_historical['itemno'].astype(str)
-        outflow_with_mode_historical['dup_key'] = outflow_with_mode_historical['idingreso'] + outflow_with_mode_historical[
+        # Create 'dup_key' in resumen_mensual_ingresos_sd
+        inflow_with_mode_historical['dup_key'] = inflow_with_mode_historical['idingreso'] + inflow_with_mode_historical[
             'itemno']
-    else:
-        # If the columns are named differently, adjust accordingly
-        # For example, if they are 'idingreso_x' and 'itemno_x':
-        outflow_with_mode_historical['idingreso'] = outflow_with_mode_historical['idingreso'].astype(str)
-        outflow_with_mode_historical['itemno_x'] = outflow_with_mode_historical['itemno_x'].astype(str)
-        outflow_with_mode_historical['dup_key'] = outflow_with_mode_historical['idingreso'] + outflow_with_mode_historical[
-            'itemno_x']
 
-    # Ensure date columns are in datetime format and normalize to remove time component
-    inflow_with_mode_historical['fecha_x'] = pd.to_datetime(
-        inflow_with_mode_historical['fecha_x'], errors='coerce'
-    ).dt.normalize()
-    outflow_with_mode_historical['fecha_x'] = pd.to_datetime(
-        outflow_with_mode_historical['fecha_x'], errors='coerce'
-    ).dt.normalize()
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    # Drop rows with invalid or missing dates
-    inflow_with_mode_historical.dropna(subset=['fecha_x'], inplace=True)
-    outflow_with_mode_historical.dropna(subset=['fecha_x'], inplace=True)
+        # Do the same for outflow_with_mode_historical if 'idingreso' and 'itemno_x' exist
+        if 'idingreso' in outflow_with_mode_historical.columns and 'itemno' in outflow_with_mode_historical.columns:
+            outflow_with_mode_historical['idingreso'] = outflow_with_mode_historical['idingreso'].astype(str)
+            outflow_with_mode_historical['itemno'] = outflow_with_mode_historical['itemno'].astype(str)
+            outflow_with_mode_historical['dup_key'] = outflow_with_mode_historical['idingreso'] + \
+                                                      outflow_with_mode_historical[
+                                                          'itemno']
+        else:
+            # If the columns are named differently, adjust accordingly
+            # For example, if they are 'idingreso_x' and 'itemno_x':
+            outflow_with_mode_historical['idingreso'] = outflow_with_mode_historical['idingreso'].astype(str)
+            outflow_with_mode_historical['itemno_x'] = outflow_with_mode_historical['itemno_x'].astype(str)
+            outflow_with_mode_historical['dup_key'] = outflow_with_mode_historical['idingreso'] + \
+                                                      outflow_with_mode_historical[
+                                                          'itemno_x']
 
-    # Step 2: Determine Earliest and Latest Dates if not provided
-    if start_date is None:
-        start_date = min(
-            inflow_with_mode_historical['fecha_x'].min(),
-            outflow_with_mode_historical['fecha_x'].min()
-        ).date()
-    else:
-        start_date = pd.to_datetime(start_date).date()
+        # Ensure date columns are in datetime format and normalize to remove time component
+        inflow_with_mode_historical['fecha_x'] = pd.to_datetime(
+            inflow_with_mode_historical['fecha_x'], errors='coerce'
+        ).dt.normalize()
+        outflow_with_mode_historical['fecha_x'] = pd.to_datetime(
+            outflow_with_mode_historical['fecha_x'], errors='coerce'
+        ).dt.normalize()
 
-    if end_date is None:
-        end_date = max(
-            inflow_with_mode_historical['fecha_x'].max(),
-            outflow_with_mode_historical['fecha_x'].max()
-        ).date()
-    else:
-        end_date = pd.to_datetime(end_date).date()
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
+        # Drop rows with invalid or missing dates
+        inflow_with_mode_historical.dropna(subset=['fecha_x'], inplace=True)
+        outflow_with_mode_historical.dropna(subset=['fecha_x'], inplace=True)
 
-    # Step 3: Prepare date range
-    date_range = pd.date_range(start=start_date, end=end_date, freq='D')
-    date_df = pd.DataFrame({'date': date_range})
+        # Step 2: Determine Earliest and Latest Dates if not provided
+        if start_date is None:
+            start_date = min(
+                inflow_with_mode_historical['fecha_x'].min(),
+                outflow_with_mode_historical['fecha_x'].min()
+            ).date()
+        else:
+            start_date = pd.to_datetime(start_date).date()
 
-    if 'idingreso' in inflow_with_mode_historical.index.names:
-        inflow_with_mode_historical.reset_index(drop=True, inplace=True)
+        if end_date is None:
+            end_date = max(
+                inflow_with_mode_historical['fecha_x'].max(),
+                outflow_with_mode_historical['fecha_x'].max()
+            ).date()
+        else:
+            end_date = pd.to_datetime(end_date).date()
 
-    # Aggregate daily inflows
-    daily_inflows = inflow_with_mode_historical.groupby(['fecha_x', 'idcontacto', 'idingreso','idmodelo']).agg({
-        'inicial': 'sum',
-        'pesokgs': 'sum',
-        'pallets_final': 'first' #no. de palets
-    }).reset_index()
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    daily_inflows = daily_inflows.groupby(['fecha_x', 'idcontacto',]).agg({
-        'inicial': 'sum',
-        'pesokgs': 'sum',
-        'pallets_final': 'sum'  # no. de palets
+        # Step 3: Prepare date range
+        date_range = pd.date_range(start=start_date, end=end_date, freq='D')
+        date_df = pd.DataFrame({'date': date_range})
 
-    }).reset_index()
+        if 'idingreso' in inflow_with_mode_historical.index.names:
+            inflow_with_mode_historical.reset_index(drop=True, inplace=True)
 
-    daily_inflows.rename(columns={
-        'fecha_x': 'date',
-        'inicial': 'Inflow (CBM)',
-        'pesokgs': 'Units inflow',
-        'pallets_final': 'Pallets inflow'
-    }, inplace=True)
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
+        # Aggregate daily inflows
+        daily_inflows = inflow_with_mode_historical.groupby(['fecha_x', 'idcontacto', 'idingreso', 'idmodelo']).agg({
+            'inicial': 'sum',
+            'pesokgs': 'sum',
+            'pallets_final': 'first'  #no. de palets
+        }).reset_index()
 
-    # Aggregate daily outflows
-    daily_outflows = outflow_with_mode_historical.groupby(['fecha_x', 'idcontacto_x', 'trannum', 'idmodelo_x']).agg({
-        'cantidad': 'sum',
-        'pesokgs': 'sum',
-        'calculated_pallets': 'first'
-    }).reset_index()
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    daily_outflows = daily_outflows.groupby(['fecha_x', 'idcontacto_x']).agg({
-        'cantidad': 'sum',
-        'pesokgs': 'sum',
-        'calculated_pallets': 'sum'
-    }).reset_index()
+        daily_inflows = daily_inflows.groupby(['fecha_x', 'idcontacto', ]).agg({
+            'inicial': 'sum',
+            'pesokgs': 'sum',
+            'pallets_final': 'sum'  # no. de palets
 
+        }).reset_index()
 
-    daily_outflows.rename(columns={
-        'fecha_x': 'date',
-        'cantidad': 'Outflow (CBM)',
-        'idcontacto_x': 'idcontacto',
-        'pesokgs': 'Units outflow',
-        'calculated_pallets': 'Pallets outflow'
-    }, inplace=True)
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    # Prepare clients list
-    clients = pd.concat([
-        daily_inflows[['idcontacto']],
-        daily_outflows[['idcontacto']]
-    ]).drop_duplicates()
+        daily_inflows.rename(columns={
+            'fecha_x': 'date',
+            'inicial': 'Inflow (CBM)',
+            'pesokgs': 'Units inflow',
+            'pallets_final': 'Pallets inflow'
+        }, inplace=True)
 
-    # Cross join clients with date range
-    inventory_over_time = clients.merge(date_df, how='cross')
+        # Aggregate daily outflows
+        daily_outflows = outflow_with_mode_historical.groupby(['fecha_x', 'idcontacto_x', 'trannum', 'idmodelo_x']).agg({
+            'cantidad': 'sum',
+            'pesokgs': 'sum',
+            'calculated_pallets': 'first'
+        }).reset_index()
 
-    # Merge inflows and outflows
-    inventory_over_time = inventory_over_time.merge(
-        daily_inflows,
-        on=['date', 'idcontacto'],
-        how='left'
-    )
-    inventory_over_time = inventory_over_time.merge(
-        daily_outflows,
-        on=['date', 'idcontacto'],
-        how='left'
-    )
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    # Fill NaNs with zeros for inflow and outflow columns
-    inventory_over_time['Inflow (CBM)'] = inventory_over_time['Inflow (CBM)'].fillna(0)
-    inventory_over_time['Outflow (CBM)'] = inventory_over_time['Outflow (CBM)'].fillna(0)
-    inventory_over_time['Units inflow'] = inventory_over_time['Units inflow'].fillna(0)
-    inventory_over_time['Units outflow'] = inventory_over_time['Units outflow'].fillna(0)
-    inventory_over_time['Pallets inflow'] = inventory_over_time['Pallets inflow'].fillna(0)
-    inventory_over_time['Pallets outflow'] = inventory_over_time['Pallets outflow'].fillna(0)
+        daily_outflows = daily_outflows.groupby(['fecha_x', 'idcontacto_x']).agg({
+            'cantidad': 'sum',
+            'pesokgs': 'sum',
+            'calculated_pallets': 'sum'
+        }).reset_index()
 
-    # Calculate cumulative inventory levels per client
-    inventory_over_time = inventory_over_time.sort_values(['idcontacto', 'date'])
-    inventory_over_time['Inventory level (CBM)'] = 0.0
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    # Set initial inventory levels
-    if initial_inventory is None:
-        initial_inventory = pd.DataFrame({
-            'idcontacto': clients['idcontacto'],
-            'initial_inventory': 0.0
-        })
+        daily_outflows.rename(columns={
+            'fecha_x': 'date',
+            'cantidad': 'Outflow (CBM)',
+            'idcontacto_x': 'idcontacto',
+            'pesokgs': 'Units outflow',
+            'calculated_pallets': 'Pallets outflow'
+        }, inplace=True)
 
-    # Merge initial inventory
-    inventory_over_time = inventory_over_time.merge(
-        initial_inventory,
-        on='idcontacto',
-        how='left'
-    )
+        # Prepare clients list
+        clients = pd.concat([
+            daily_inflows[['idcontacto']],
+            daily_outflows[['idcontacto']]
+        ]).drop_duplicates()
 
-    # Calculate cumulative inventory levels with adjustments to prevent negative inventory
-    for idcontacto, group in inventory_over_time.groupby('idcontacto'):
-        initial_inv = group['initial_inventory'].iloc[0]
-        # Initialize Units and Pallets with initial inventory if available
-        initial_units = 0.0  # Adjust if you have initial units per client
-        initial_pallets = 0.0  # Adjust if you have initial pallets per client
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-        inventory_levels = []
-        units_levels = []
-        pallets_levels = []
-        current_inventory = initial_inv
-        current_units = initial_units
-        current_pallets = initial_pallets
+        # Cross join clients with date range
+        inventory_over_time = clients.merge(date_df, how='cross')
 
-        for idx, row in group.iterrows():
-            inflow = row['Inflow (CBM)']
-            outflow = row['Outflow (CBM)']
-            units_inflow = row['Units inflow']
-            units_outflow = row['Units outflow']
-            pallets_inflow = row['Pallets inflow']
-            pallets_outflow = row['Pallets outflow']
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-            # Calculate potential new inventory levels
-            potential_inventory = current_inventory + inflow - outflow
+        # Merge inflows and outflows
+        inventory_over_time = inventory_over_time.merge(
+            daily_inflows,
+            on=['date', 'idcontacto'],
+            how='left'
+        )
 
-            if potential_inventory < 0:
-                # Adjust outflow to prevent negative inventory
-                adjusted_outflow = current_inventory + inflow
-                # Calculate adjustment factor to proportionally adjust units and pallets
-                if outflow != 0:
-                    adjustment_factor = adjusted_outflow / outflow
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
+
+        inventory_over_time = inventory_over_time.merge(
+            daily_outflows,
+            on=['date', 'idcontacto'],
+            how='left'
+        )
+
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
+
+        # Fill NaNs with zeros for inflow and outflow columns
+        inventory_over_time['Inflow (CBM)'] = inventory_over_time['Inflow (CBM)'].fillna(0)
+        inventory_over_time['Outflow (CBM)'] = inventory_over_time['Outflow (CBM)'].fillna(0)
+        inventory_over_time['Units inflow'] = inventory_over_time['Units inflow'].fillna(0)
+        inventory_over_time['Units outflow'] = inventory_over_time['Units outflow'].fillna(0)
+        inventory_over_time['Pallets inflow'] = inventory_over_time['Pallets inflow'].fillna(0)
+        inventory_over_time['Pallets outflow'] = inventory_over_time['Pallets outflow'].fillna(0)
+
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
+
+        # Calculate cumulative inventory levels per client
+        inventory_over_time = inventory_over_time.sort_values(['idcontacto', 'date'])
+        inventory_over_time['Inventory level (CBM)'] = 0.0
+
+        # Set initial inventory levels
+        if initial_inventory is None:
+            initial_inventory = pd.DataFrame({
+                'idcontacto': clients['idcontacto'],
+                'initial_inventory': 0.0
+            })
+
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
+
+        # Merge initial inventory
+        inventory_over_time = inventory_over_time.merge(
+            initial_inventory,
+            on='idcontacto',
+            how='left'
+        )
+
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
+
+        # Calculate cumulative inventory levels with adjustments to prevent negative inventory
+        for idcontacto, group in inventory_over_time.groupby('idcontacto'):
+            initial_inv = group['initial_inventory'].iloc[0]
+            # Initialize Units and Pallets with initial inventory if available
+            initial_units = 0.0  # Adjust if you have initial units per client
+            initial_pallets = 0.0  # Adjust if you have initial pallets per client
+
+            inventory_levels = []
+            units_levels = []
+            pallets_levels = []
+            current_inventory = initial_inv
+            current_units = initial_units
+            current_pallets = initial_pallets
+
+            for idx, row in group.iterrows():
+                inflow = row['Inflow (CBM)']
+                outflow = row['Outflow (CBM)']
+                units_inflow = row['Units inflow']
+                units_outflow = row['Units outflow']
+                pallets_inflow = row['Pallets inflow']
+                pallets_outflow = row['Pallets outflow']
+
+                # Calculate potential new inventory levels
+                potential_inventory = current_inventory + inflow - outflow
+
+                if potential_inventory < 0:
+                    # Adjust outflow to prevent negative inventory
+                    adjusted_outflow = current_inventory + inflow
+                    # Calculate adjustment factor to proportionally adjust units and pallets
+                    if outflow != 0:
+                        adjustment_factor = adjusted_outflow / outflow
+                    else:
+                        adjustment_factor = 0.0
+                    # Adjust units_outflow and pallets_outflow proportionally
+                    adjusted_units_outflow = units_outflow * adjustment_factor
+                    adjusted_pallets_outflow = pallets_outflow * adjustment_factor
+
+                    # Update current inventory, units, and pallets
+                    current_inventory = 0.0
+                    current_units += units_inflow - adjusted_units_outflow
+                    current_pallets += pallets_inflow - adjusted_pallets_outflow
                 else:
-                    adjustment_factor = 0.0
-                # Adjust units_outflow and pallets_outflow proportionally
-                adjusted_units_outflow = units_outflow * adjustment_factor
-                adjusted_pallets_outflow = pallets_outflow * adjustment_factor
+                    # No adjustment needed
+                    adjusted_units_outflow = units_outflow
+                    adjusted_pallets_outflow = pallets_outflow
 
-                # Update current inventory, units, and pallets
-                current_inventory = 0.0
-                current_units += units_inflow - adjusted_units_outflow
-                current_pallets += pallets_inflow - adjusted_pallets_outflow
-            else:
-                # No adjustment needed
-                adjusted_units_outflow = units_outflow
-                adjusted_pallets_outflow = pallets_outflow
+                    current_inventory = potential_inventory
+                    current_units += units_inflow - adjusted_units_outflow
+                    current_pallets += pallets_inflow - adjusted_pallets_outflow
 
-                current_inventory = potential_inventory
-                current_units += units_inflow - adjusted_units_outflow
-                current_pallets += pallets_inflow - adjusted_pallets_outflow
+                # Ensure units and pallets are non-negative
+                current_units = max(current_units, 0.0)
+                current_pallets = max(current_pallets, 0.0)
 
-            # Ensure units and pallets are non-negative
-            current_units = max(current_units, 0.0)
-            current_pallets = max(current_pallets, 0.0)
+                # Set units and pallets to zero when inventory level is zero
+                if current_inventory == 0.0:
+                    current_units = 0.0
+                    current_pallets = 0.0
 
-            # Set units and pallets to zero when inventory level is zero
-            if current_inventory == 0.0:
-                current_units = 0.0
-                current_pallets = 0.0
+                inventory_levels.append(current_inventory)
+                units_levels.append(current_units)
+                pallets_levels.append(current_pallets)
 
-            inventory_levels.append(current_inventory)
-            units_levels.append(current_units)
-            pallets_levels.append(current_pallets)
+            inventory_over_time.loc[group.index, 'Inventory level (CBM)'] = inventory_levels
+            inventory_over_time.loc[group.index, 'Units'] = units_levels
+            inventory_over_time.loc[group.index, 'Pallets'] = pallets_levels
 
-        inventory_over_time.loc[group.index, 'Inventory level (CBM)'] = inventory_levels
-        inventory_over_time.loc[group.index, 'Units'] = units_levels
-        inventory_over_time.loc[group.index, 'Pallets'] = pallets_levels
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    # Drop the 'initial_inventory' column if not needed
-    inventory_over_time.drop(columns=['initial_inventory', 'idcontacto'], inplace=True)
+        # Drop the 'initial_inventory' column if not needed
+        inventory_over_time.drop(columns=['initial_inventory', 'idcontacto'], inplace=True)
 
-    # Save to CSV
-    output_path = os.path.join(get_base_output_path(), 'insaldo_historic_dataframe.csv')
-    inventory_over_time.to_csv(output_path, index=False)
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    # Compute Opening Inventory level (CBM)
-    inventory_over_time['Opening Inventory level (CBM)'] = (
-            inventory_over_time['Inventory level (CBM)'] - inventory_over_time['Inflow (CBM)'] + inventory_over_time[
-        'Outflow (CBM)']
-    )
+        # Compute Opening Inventory level (CBM)
+        inventory_over_time['Opening Inventory level (CBM)'] = (
+                inventory_over_time['Inventory level (CBM)'] - inventory_over_time['Inflow (CBM)'] + inventory_over_time[
+            'Outflow (CBM)']
+        )
 
-    # Group by month and calculate initial and final inventory levels
-    inventory_ot_by_month = inventory_over_time.groupby(pd.Grouper(key='date')).agg({
-        'Inflow (CBM)': 'sum',
-        'Units inflow': 'sum',
-        'Pallets inflow': 'sum',
-        'Outflow (CBM)': 'sum',
-        'Units outflow': 'sum',
-        'Pallets outflow': 'sum',
-        'Opening Inventory level (CBM)': 'first',  # Initial inventory
-        'Inventory level (CBM)': 'last',  # Final inventory
-    }).reset_index()
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    # Rename the columns
-    inventory_ot_by_month.rename(columns={
-        'Opening Inventory level (CBM)': 'Initial Inventory level (CBM)',
-        'Inventory level (CBM)': 'Final Inventory level (CBM)'
-    }, inplace=True)
+        # Group by month and calculate initial and final inventory levels
+        inventory_ot_by_month = inventory_over_time.groupby(pd.Grouper(key='date')).agg({
+            'Inflow (CBM)': 'sum',
+            'Units inflow': 'sum',
+            'Pallets inflow': 'sum',
+            'Outflow (CBM)': 'sum',
+            'Units outflow': 'sum',
+            'Pallets outflow': 'sum',
+            'Opening Inventory level (CBM)': 'first',  # Initial inventory
+            'Inventory level (CBM)': 'last',  # Final inventory
+        }).reset_index()
 
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    # # Normalize 'start_date' and 'end_date'
-    # start_date = pd.to_datetime(start_date).normalize()
-    # end_date = pd.to_datetime(end_date).normalize()
+        # Rename the columns
+        inventory_ot_by_month.rename(columns={
+            'Opening Inventory level (CBM)': 'Initial Inventory level (CBM)',
+            'Inventory level (CBM)': 'Final Inventory level (CBM)'
+        }, inplace=True)
 
-    # # Apply filtering
-    # inventory_over_time_filtered = inventory_over_time[
-    #     (inventory_over_time['date'] >= start_date) &
-    #     (inventory_over_time['date'] <= end_date)
-    #     ]
+        # # Normalize 'start_date' and 'end_date'
+        # start_date = pd.to_datetime(start_date).normalize()
+        # end_date = pd.to_datetime(end_date).normalize()
 
+        # # Apply filtering
+        # inventory_over_time_filtered = inventory_over_time[
+        #     (inventory_over_time['date'] >= start_date) &
+        #     (inventory_over_time['date'] <= end_date)
+        #     ]
 
-    # Save to CSV
-    output_path = os.path.join(get_base_output_path(), 'insaldo_historic_dataframe_behavior_by_month.csv')
-    inventory_ot_by_month.to_csv(output_path, index=False)
-    output_path = os.path.join(get_base_output_path(), 'inventory_over_time.csv')
-    inventory_over_time.to_csv(output_path, index=False)
+        # Save to CSV
+        output_path = os.path.join(get_base_output_path(), 'insaldo_historic_dataframe_behavior_by_month.csv')
+        inventory_ot_by_month.to_csv(output_path, index=False)
+        output_path = os.path.join(get_base_output_path(), 'inventory_over_time.csv')
+        inventory_over_time.to_csv(output_path, index=False)
+
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
+
+    # print('Inventory behavior for selected month:\n', inventory_over_time)
+    print("Inventory behavior reconstruction complete.\n")
 
     return inventory_over_time, inventory_ot_by_month
+
 
 def filtering_historic_insaldo(inventory_over_time, start_date, end_date):
     # Ensure the 'date' column is in datetime format
@@ -2222,258 +2821,410 @@ def filtering_historic_insaldo(inventory_over_time, start_date, end_date):
     return selected_month_data
 
 def kpi_calculation(inventory_over_time, inventory_ot_by_month, start_date, end_date):
-    # Ensure the 'date' column is in datetime format
-    inventory_over_time['date'] = pd.to_datetime(inventory_over_time['date'])
+    with Progress() as progress:
+        # Add a new task
+        task = progress.add_task("[green]Constructing KPIs: ", total=9)
 
-    # # Filter data within the date range
-    # inventory_over_time = inventory_over_time[
-    #     (inventory_over_time['date'] >= start_date) & (inventory_over_time['date'] <= end_date)
-    #     ]
+        # Ensure the 'date' column is in datetime format
+        inventory_over_time['date'] = pd.to_datetime(inventory_over_time['date'])
 
-    # Add 'month' column for grouping
-    inventory_over_time['month'] = inventory_over_time['date'].dt.to_period('M')
+        # # Filter data within the date range
+        # inventory_over_time = inventory_over_time[
+        #     (inventory_over_time['date'] >= start_date) & (inventory_over_time['date'] <= end_date)
+        #     ]
 
-    # Aggregate data by month
-    monthly_data = inventory_over_time.groupby('month').agg({
-        'Inflow (CBM)': 'sum',
-        'Outflow (CBM)': 'sum',
-        'Inventory level (CBM)': 'last'  # Use last inventory level of the month
-    }).reset_index()
+        # Add 'month' column for grouping
+        inventory_over_time['month'] = inventory_over_time['date'].dt.to_period('M')
 
-    # Calculate Average Inventory Level per month
-    monthly_data['Average Inventory Level (CBM)'] = (
-                                                            monthly_data['Inventory level (CBM)'] + monthly_data[
-                                                        'Inventory level (CBM)'].shift(1)
-                                                    ) / 2
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    # Calculate Inventory Turnover per month
-    monthly_data['Inventory Turnover'] = monthly_data.apply(
-        lambda row: (row['Outflow (CBM)'] / row['Average Inventory Level (CBM)'])
-        if row['Average Inventory Level (CBM)'] != 0 else np.nan,
-        axis=1
-    )
+        # Aggregate data by month
+        monthly_data = inventory_over_time.groupby('month').agg({
+            'Inflow (CBM)': 'sum',
+            'Outflow (CBM)': 'sum',
+            'Inventory level (CBM)': 'last'  # Use last inventory level of the month
+        }).reset_index()
 
-    # Replace infinite values with NaN
-    monthly_data['Inventory Turnover'].replace([np.inf, -np.inf], np.nan, inplace=True)
+        # Calculate Average Inventory Level per month
+        monthly_data['Average Inventory Level (CBM)'] = (
+                                                                monthly_data['Inventory level (CBM)'] + monthly_data[
+                                                            'Inventory level (CBM)'].shift(1)
+                                                        ) / 2
 
-    # Calculate Days on Hand per month
-    monthly_data['Days on Hand'] = monthly_data.apply(
-        lambda row: (row['Inventory level (CBM)'] / (row['Outflow (CBM)'] / row['month'].asfreq('M').days_in_month))
-        if row['Outflow (CBM)'] != 0 else np.nan,
-        axis=1
-    )
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    # Calculate MoM Percentage Changes for KPIs
-    monthly_data['Inflow MoM %'] = monthly_data['Inflow (CBM)'].pct_change() * 100
-    monthly_data['Outflow MoM %'] = monthly_data['Outflow (CBM)'].pct_change() * 100
-    monthly_data['Inventory Level MoM %'] = monthly_data['Inventory level (CBM)'].pct_change() * 100
+        # Calculate Inventory Turnover per month
+        monthly_data['Inventory Turnover'] = monthly_data.apply(
+            lambda row: (row['Outflow (CBM)'] / row['Average Inventory Level (CBM)'])
+            if row['Average Inventory Level (CBM)'] != 0 else np.nan,
+            axis=1
+        )
 
-    # Replace infinite values with NaN
-    for col in ['Inflow MoM %', 'Outflow MoM %', 'Inventory Level MoM %']:
-        monthly_data[col].replace([np.inf, -np.inf], np.nan, inplace=True)
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    # Fill NaN values where appropriate
-    monthly_data.fillna({
-        'Inventory Turnover': 0,
-        'Days on Hand': 0,
-        'Inflow MoM %': 0,
-        'Outflow MoM %': 0,
-        'Inventory Level MoM %': 0,
-    }, inplace=True)
+        # Replace infinite values with NaN
+        monthly_data['Inventory Turnover'].replace([np.inf, -np.inf], np.nan, inplace=True)
 
-    # Round numerical values for presentation
-    monthly_data = monthly_data.round(2)
+        # Calculate Days on Hand per month
+        monthly_data['Days on Hand'] = monthly_data.apply(
+            lambda row: (row['Inventory level (CBM)'] / (row['Outflow (CBM)'] / row['month'].asfreq('M').days_in_month))
+            if row['Outflow (CBM)'] != 0 else np.nan,
+            axis=1
+        )
 
-    # Replace any remaining NaN values with 'N/A' for clarity
-    monthly_data.replace({np.nan: 'N/A'}, inplace=True)
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    # Convert 'month' back to string format for better display
-    monthly_data['month'] = monthly_data['month'].astype(str)
+        # Calculate MoM Percentage Changes for KPIs
+        monthly_data['Inflow MoM %'] = monthly_data['Inflow (CBM)'].pct_change() * 100
+        monthly_data['Outflow MoM %'] = monthly_data['Outflow (CBM)'].pct_change() * 100
+        monthly_data['Inventory Level MoM %'] = monthly_data['Inventory level (CBM)'].pct_change() * 100
 
-    # Filter the data to include only months within the date range
-    # Since months are in 'YYYY-MM' format, we'll adjust start and end dates accordingly
-    start_month = start_date.to_period('M').strftime('%Y-%m')
-    end_month = end_date.to_period('M').strftime('%Y-%m')
-    # monthly_data = monthly_data[
-    #     (monthly_data['month'] >= start_month) & (monthly_data['month'] <= end_month)
-    #     ]
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-    # Reorder columns for better presentation
-    monthly_data = monthly_data[[
-        'month',
-        'Inflow (CBM)',
-        'Outflow (CBM)',
-        'Inventory level (CBM)',
-        'Inventory Turnover',
-        'Days on Hand',
-        'Inflow MoM %',
-        'Outflow MoM %',
-        'Inventory Level MoM %',
-    ]]
+        # Replace infinite values with NaN
+        for col in ['Inflow MoM %', 'Outflow MoM %', 'Inventory Level MoM %']:
+            monthly_data[col].replace([np.inf, -np.inf], np.nan, inplace=True)
+
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
+
+        # Fill NaN values where appropriate
+        monthly_data.fillna({
+            'Inventory Turnover': 0,
+            'Days on Hand': 0,
+            'Inflow MoM %': 0,
+            'Outflow MoM %': 0,
+            'Inventory Level MoM %': 0,
+        }, inplace=True)
+
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
+
+        # Round numerical values for presentation
+        monthly_data = monthly_data.round(2)
+
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
+
+        # Replace any remaining NaN values with 'N/A' for clarity
+        monthly_data.replace({np.nan: 'N/A'}, inplace=True)
+
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
+
+        # Convert 'month' back to string format for better display
+        monthly_data['month'] = monthly_data['month'].astype(str)
+
+        # Filter the data to include only months within the date range
+        # Since months are in 'YYYY-MM' format, we'll adjust start and end dates accordingly
+        start_month = start_date.to_period('M').strftime('%Y-%m')
+        end_month = end_date.to_period('M').strftime('%Y-%m')
+        # monthly_data = monthly_data[
+        #     (monthly_data['month'] >= start_month) & (monthly_data['month'] <= end_month)
+        #     ]
+
+        # Reorder columns for better presentation
+        monthly_data = monthly_data[[
+            'month',
+            'Inflow (CBM)',
+            'Outflow (CBM)',
+            'Inventory level (CBM)',
+            'Inventory Turnover',
+            'Days on Hand',
+            'Inflow MoM %',
+            'Outflow MoM %',
+            'Inventory Level MoM %',
+        ]]
+
+        # Step:
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
     # Print KPIs for the selected months
-    print("\nKPIs for the selected months:")
-    print(monthly_data)
+    print("\nKPIs for the selected months:\n", monthly_data)
+    print("KPI calculation complete.\n")
+
+def main():
+    # Input date range
+    start_date_str = input("Enter the start date of analysis (dd/mm/yy or dd-mm-yy): ")
+    end_date_str = input("Enter the end date of analysis (dd/mm/yy or dd-mm-yy): ")
+
+    # Convert to datetime with error handling
+    try:
+        start_date = parse_date(start_date_str)
+        end_date = parse_date(end_date_str)
+
+        if start_date > end_date:
+            print("Error: Start date must be before or equal to end date.")
+            return
+
+        # Convert to pandas Timestamp for compatibility with DataFrame date columns
+        start_date = pd.Timestamp(start_date)
+        end_date = pd.Timestamp(end_date)
+    except ValueError as e:
+        print(e)
+        return
+
+    print(f"Analysis from {start_date.date()} to {end_date.date()}")
+
+    pd.set_option(
+        "display.max_rows", 100,
+        "display.max_columns", None,
+        "display.expand_frame_repr", False
+    )
+
+    print("\nMain: Loading data...\n")
+
+    (wl_ingresos, rpshd_despachos, rpsdt_productos,
+     registro_ingresos, registro_salidas, inmovih_table, saldo_inventory,
+     supplier_info, ctcentro_table, producto_modelos, dispatched_inventory, inventario_sin_filtro) = load_data()
+
+    # Debugging: Print loaded data
+    print("\nLoaded Data:\n")
+    for name, df in zip([
+        'wl_ingresos', 'rpshd_despachos', 'rpsdt_productos',
+        'registro_ingresos', 'registro_salidas', 'inmovih_table',
+        'saldo_inventory', 'supplier_info', 'ctcentro_table',
+        'producto_modelos', 'dispatched_inventory', 'inventario_sin_filtro'
+    ], [
+        wl_ingresos, rpshd_despachos, rpsdt_productos,
+        registro_ingresos, registro_salidas, inmovih_table,
+        saldo_inventory, supplier_info, ctcentro_table,
+        producto_modelos, dispatched_inventory, inventario_sin_filtro
+    ]):
+        print(f"{name}:\n", df.head(), "\n")
+
+    # Convert 'descrip' and 'idcontacto' to string and strip whitespaces
+    supplier_info['descrip'] = supplier_info['descrip'].astype(str).str.strip()
+    supplier_info['idcontacto'] = supplier_info['idcontacto'].astype(str).str.strip()
+
+    # Ask user if the analysis should be by Client or by Warehouse
+    analysis_type = input("Would you like to analyze by Client or Warehouse? "
+                          "(Enter 'C' for Client, 'W' for Warehouse): ").strip().upper()
+
+    if analysis_type == 'C':
+        # Display the list of clients
+        unique_clients = supplier_info[['idcontacto', 'descrip']].drop_duplicates().reset_index(drop=True)
+        print("List of clients:")
+        for idx, row in unique_clients.iterrows():
+            print(f"{idx}: {row['descrip']} ({row['idcontacto']})")
+
+        # Prompt the user to select the client by entering the index number
+        try:
+            selected_idx = int(input("Enter the number of the client you want to analyze data by: "))
+            if selected_idx < 0 or selected_idx >= len(unique_clients):
+                print(f"Invalid selection '{selected_idx}'")
+                return
+        except ValueError:
+            print("Invalid input. Please enter a valid number.")
+            return
+
+        selected_entity = unique_clients.iloc[selected_idx]
+        entity_id = selected_entity['idcontacto']
+        entity_name = selected_entity['descrip']
+        print(f"Selected client: {entity_name} (idcontacto: {entity_id})")
+
+        # List of DataFrames to filter by client
+        dataframes_to_filter = [wl_ingresos, rpshd_despachos, rpsdt_productos,
+                                registro_ingresos, registro_salidas, inmovih_table, saldo_inventory,
+                                dispatched_inventory, inventario_sin_filtro]
+
+        # Filter DataFrames based on the selected client before data_processing
+        filtered_dataframes = filter_dataframes_by_idcontacto(dataframes_to_filter, entity_id)
+
+        # Debugging: Print filtered data
+        print("\nFiltered Data by Client:\n")
+        for name, df in zip([
+            'wl_ingresos', 'rpshd_despachos', 'rpsdt_productos',
+            'registro_ingresos', 'registro_salidas', 'inmovih_table',
+            'saldo_inventory', 'dispatched_inventory', 'inventario_sin_filtro'
+        ], filtered_dataframes):
+            print(f"{name} (Filtered by Client):\n", df.head(), "\n")
+
+        # Unpack filtered DataFrames
+        (wl_ingresos, rpshd_despachos, rpsdt_productos,
+         registro_ingresos, registro_salidas, inmovih_table, saldo_inventory,
+         dispatched_inventory, inventario_sin_filtro) = filtered_dataframes
+
+    elif analysis_type == 'W':
+        # Display the list of warehouses
+        warehouses = ["BODA", "BODC", "BODE", "BODG", "BODJ", "OPL", "INCOHERENT VALUES", "DESCONOCIDO", "INTEMPERIE",
+                      "PISO"]
+        print("List of warehouses:")
+        for idx, warehouse in enumerate(warehouses):
+            print(f"{idx}: {warehouse}")
+
+        # Prompt the user to select the warehouse by entering the index number
+        try:
+            selected_idx = input(
+                "Enter the number of the warehouse you want to analyze data by (or 'A' for All Warehouses): ").strip().upper()
+            if selected_idx == 'A':
+                entity_id = None  # Means all warehouses
+                entity_name = "All Warehouses"
+            else:
+                selected_idx = int(selected_idx)
+                if selected_idx < 0 or selected_idx >= len(warehouses):
+                    print(f"Invalid selection '{selected_idx}'")
+                    return
+                entity_id = warehouses[selected_idx]
+                entity_name = entity_id
+        except ValueError:
+            print("Invalid input. Please enter a valid number.")
+            return
+
+        print(f"Selected warehouse: {entity_name}")
+
+        # Filtering for warehouses is done after data_screening
+
+    else:
+        print("Invalid selection. Please enter 'C' for Client or 'W' for Warehouse.")
+        return
+
+    print("\nMain: Processing data...\n")
+
+    (wl_ingresos, rpshd_despachos, rpsdt_productos, registro_ingresos, registro_salidas,
+     inmovih_table, saldo_inventory, supplier_info, ctcentro_table, producto_modelos,
+     dispatched_inventory, inventario_sin_filtro) = data_processing(
+        wl_ingresos, rpshd_despachos, rpsdt_productos, registro_ingresos, registro_salidas,
+        inmovih_table, saldo_inventory, supplier_info, ctcentro_table, producto_modelos, dispatched_inventory,
+        inventario_sin_filtro)
+
+    # Debugging: Print processed data
+    print("\nProcessed Data:\n")
+    for name, df in zip([
+        'wl_ingresos', 'rpshd_despachos', 'rpsdt_productos',
+        'registro_ingresos', 'registro_salidas', 'inmovih_table',
+        'saldo_inventory', 'supplier_info', 'ctcentro_table',
+        'producto_modelos', 'dispatched_inventory', 'inventario_sin_filtro'
+    ], [
+        wl_ingresos, rpshd_despachos, rpsdt_productos,
+        registro_ingresos, registro_salidas, inmovih_table,
+        saldo_inventory, supplier_info, ctcentro_table,
+        producto_modelos, dispatched_inventory, inventario_sin_filtro
+    ]):
+        print(f"{name} (After Processing):\n", df.head(), "\n")
+
+    print("\nMain: Screening data...")
+
+    # Filtrar las tablas por bodega
+    (saldo_inventory, registro_ingresos, registro_salidas, rpsdt_productos_s, rpshd_despachos, wl_ingresos,
+     inmovih_table, dispatched_inventory) = data_screening(saldo_inventory, registro_ingresos, registro_salidas,
+                                                           rpsdt_productos, rpshd_despachos, wl_ingresos, inmovih_table,
+                                                           dispatched_inventory)
+
+    # Debugging: Print screened data
+    print("\nScreened Data:\n")
+    for name, df in zip([
+        'saldo_inventory', 'registro_ingresos', 'registro_salidas', 'rpsdt_productos_s',
+        'rpshd_despachos', 'wl_ingresos', 'inmovih_table', 'dispatched_inventory'
+    ], [
+        saldo_inventory, registro_ingresos, registro_salidas, rpsdt_productos_s,
+        rpshd_despachos, wl_ingresos, inmovih_table, dispatched_inventory
+    ]):
+        print(f"{name} (After Screening):\n", df.head(), "\n")
+
+    # If warehouse analysis, filter DataFrames after data_screening
+    if analysis_type == 'W' and entity_id is not None:
+        # List of DataFrames to filter by warehouse
+        dataframes_to_filter = [wl_ingresos, rpshd_despachos, rpsdt_productos,
+                                registro_ingresos, registro_salidas, inmovih_table, saldo_inventory,
+                                dispatched_inventory, inventario_sin_filtro]
+
+        # Filter DataFrames based on the selected warehouse
+        filtered_dataframes = filter_dataframes_by_warehouse(dataframes_to_filter, entity_id)
+
+        # Debugging: Print filtered data by warehouse
+        print("\nFiltered Data by Warehouse:\n")
+        for name, df in zip([
+            'wl_ingresos', 'rpshd_despachos', 'rpsdt_productos',
+            'registro_ingresos', 'registro_salidas', 'inmovih_table',
+            'saldo_inventory', 'dispatched_inventory', 'inventario_sin_filtro'
+        ], filtered_dataframes):
+            print(f"{name} (Filtered by Warehouse):\n", df.head(), "\n")
+
+        # Unpack filtered DataFrames
+        (wl_ingresos, rpshd_despachos, rpsdt_productos,
+         registro_ingresos, registro_salidas, inmovih_table, saldo_inventory,
+         dispatched_inventory, inventario_sin_filtro) = filtered_dataframes
+
+    print("\nMain: Generating all reception data by warehouse and client...\n")
+
+    resumen_mensual_ingresos_clientes, resumen_mensual_ingresos_sd, resumen_mensual_ingresos_fact = (
+        monthly_receptions_summary(registro_ingresos, supplier_info,
+                                   inventario_sin_filtro, rpsdt_productos))
+
+    # Debugging: Print monthly reception summaries
+    print("\nMonthly Receptions Summary:\n")
+    print("resumen_mensual_ingresos_clientes:\n", resumen_mensual_ingresos_clientes.head(), "\n")
+    print("resumen_mensual_ingresos_sd:\n", resumen_mensual_ingresos_sd.head(), "\n")
+    print("resumen_mensual_ingresos_fact:\n", resumen_mensual_ingresos_fact.head(), "\n")
+
+    print("\nMain: Generating all dispatch data by warehouse and client...\n")
+
+    resumen_mensual_despachos_clientes_grouped, merged_despachos_inventario, resumen_despachos_cliente_fact = (
+        monthly_dispatch_summary(registro_salidas, dispatched_inventory, supplier_info))
+
+    # Debugging: Print monthly dispatch summaries
+    print("\nMonthly Dispatch Summary:\n")
+    print("resumen_mensual_despachos_clientes_grouped:\n", resumen_mensual_despachos_clientes_grouped.head(), "\n")
+    print("merged_despachos_inventario:\n", merged_despachos_inventario.head(), "\n")
+    print("resumen_despachos_cliente_fact:\n", resumen_despachos_cliente_fact.head(), "\n")
+
+    if not resumen_mensual_ingresos_clientes.empty and not resumen_mensual_despachos_clientes_grouped.empty:
+        resumen_mensual_ingresos_bodega, resumen_mensual_despachos_bodega = group_by_month_bodega(
+            resumen_mensual_ingresos_clientes, resumen_mensual_despachos_clientes_grouped, start_date, end_date)
+    else:
+        print("\nCannot proceed with grouping by Bodega due to lack of data.\n")
+
+    saldo_inventory = insaldo_bode_comp(saldo_inventory)
+
+    print("\nMain: Analysing actual Inventory...\n")
+
+    if not saldo_inventory.empty and not supplier_info.empty:
+        saldo_inv_cliente_fact = capacity_measured_in_cubic_meters(saldo_inventory, supplier_info)
+        inventory_proportions_by_product(saldo_inventory, supplier_info)
+        inventory_oldest_products(saldo_inventory, supplier_info)
+    else:
+        print("\nCannot proceed with inventory status calculations - Client currently has no "
+              "product on any warehouse.\n")
+
+    print("\nMain: Reconstructing data for billing...\n")
+
+    if not saldo_inv_cliente_fact.empty:
+        inflow_with_mode_historical, outflow_with_mode_historical, final_df = (
+            billing_data_reconstruction(saldo_inv_cliente_fact, resumen_mensual_ingresos_fact,
+                                        resumen_despachos_cliente_fact, start_date, end_date, registro_ingresos))
+    else:
+        print("\nCannot proceed with inventory status calculations - Client currently has no "
+              "product on any warehouse.\n")
+
+    print("\nMain: Reconstructing historic Inventory data and behavior...\n")
+
+    inventory_over_time, inventory_ot_by_month = reconstruct_inventory_over_time(
+        inflow_with_mode_historical,
+        outflow_with_mode_historical, start_date=None, end_date=None
+    )
+
+    selected_month_data = filtering_historic_insaldo(inventory_over_time, start_date, end_date)
+
+    print("\nMain: Calculating relevant KPIs for analysis...\n")
+
+    kpi_calculation(inventory_over_time, inventory_ot_by_month, start_date, end_date)
 
 
-
-
-
-
-# def main():
-#     # Input date range
-#     start_date_str = input("Enter the start date of analysis (dd/mm/yy or dd-mm-yy): ")
-#     end_date_str = input("Enter the end date of analysis (dd/mm/yy or dd-mm-yy): ")
-#
-#     # Convert to datetime with error handling
-#     try:
-#         start_date = parse_date(start_date_str)
-#         end_date = parse_date(end_date_str)
-#
-#         if start_date > end_date:
-#             print("Error: Start date must be before or equal to end date.")
-#             return
-#
-#         # Convert to pandas Timestamp for compatibility with DataFrame date columns
-#         start_date = pd.Timestamp(start_date)
-#         end_date = pd.Timestamp(end_date)
-#     except ValueError as e:
-#         print(e)
-#         return
-#
-#     print(f"Analysis from {start_date.date()} to {end_date.date()}")
-#
-#     pd.set_option(
-#         "display.max_rows", 100,
-#         "display.max_columns", None,
-#         "display.expand_frame_repr", False
-#     )
-#
-#     print("\nMain: Loading data...\n")
-#
-#     (wl_ingresos, rpshd_despachos, rpsdt_productos,
-#      registro_ingresos, registro_salidas, inmovih_table, saldo_inventory,
-#      supplier_info, ctcentro_table, producto_modelos, dispatched_inventory, inventario_sin_filtro) = load_data()
-#
-#     # Convert 'descrip' and 'idcontacto' to string and strip whitespaces
-#     supplier_info['descrip'] = supplier_info['descrip'].astype(str).str.strip()
-#     supplier_info['idcontacto'] = supplier_info['idcontacto'].astype(str).str.strip()
-#
-#     # Display the list of clients
-#     unique_clients = supplier_info[['idcontacto', 'descrip']].drop_duplicates().reset_index(drop=True)
-#     print("List of clients:")
-#     for idx, row in unique_clients.iterrows():
-#         print(f"{idx}: {row['descrip']} ({row['idcontacto']})")
-#
-#     # Prompt the user to select the client by entering the index number
-#     try:
-#         selected_idx = int(input("Enter the number of the client you want to analyze data by: "))
-#         if selected_idx < 0 or selected_idx >= len(unique_clients):
-#             print(f"Invalid selection '{selected_idx}'")
-#             return
-#     except ValueError:
-#         print("Invalid input. Please enter a valid number.")
-#         return
-#
-#     selected_client = unique_clients.iloc[selected_idx]
-#     idcontacto = selected_client['idcontacto']
-#     print(f"Selected client: {selected_client['descrip']} (idcontacto: {idcontacto})")
-#
-#     idcontacto = selected_client['idcontacto']
-#     print(f"Selected client: {selected_client['descrip']} (idcontacto: {idcontacto})")
-#
-#     # List of DataFrames to filter
-#     dataframes_to_filter = [wl_ingresos, rpshd_despachos, rpsdt_productos,
-#                             registro_ingresos, registro_salidas, inmovih_table, saldo_inventory,
-#                             dispatched_inventory, inventario_sin_filtro]
-#
-#     # Filter DataFrames
-#     filtered_dataframes = filter_dataframes_by_idcontacto(dataframes_to_filter, idcontacto)
-#
-#     # Unpack filtered DataFrames
-#     (wl_ingresos, rpshd_despachos, rpsdt_productos,
-#      registro_ingresos, registro_salidas, inmovih_table, saldo_inventory,
-#      dispatched_inventory, inventario_sin_filtro) = filtered_dataframes
-#
-#     print("\nMain: Processing data...\n")
-#
-#     (wl_ingresos, rpshd_despachos, rpsdt_productos, registro_ingresos, registro_salidas,
-#      inmovih_table, saldo_inventory, supplier_info, ctcentro_table, producto_modelos,
-#      dispatched_inventory, inventario_sin_filtro) = data_processing(
-#         wl_ingresos, rpshd_despachos, rpsdt_productos, registro_ingresos, registro_salidas,
-#         inmovih_table, saldo_inventory, supplier_info, ctcentro_table, producto_modelos, dispatched_inventory,
-#         inventario_sin_filtro)
-#
-#     print("\nMain: Screening data...")
-#
-#     # Filtrar las tablas por bodega
-#     (saldo_inventory, registro_ingresos, registro_salidas, rpsdt_productos_s, rpshd_despachos, wl_ingresos,
-#      inmovih_table, dispatched_inventory) = data_screening(saldo_inventory, registro_ingresos, registro_salidas,
-#                                                            rpsdt_productos, rpshd_despachos, wl_ingresos, inmovih_table,
-#                                                            dispatched_inventory)
-#
-#     print("\nMain: Generating all reception data by warehouse and client...\n")
-#
-#     resumen_mensual_ingresos_clientes, resumen_mensual_ingresos_sd, resumen_mensual_ingresos_fact = (
-#         monthly_receptions_summary(registro_ingresos, supplier_info,
-#                                    inventario_sin_filtro, rpsdt_productos))
-#
-#     print("\nMain: Generating all dispatch data by warehouse and client...\n")
-#
-#     resumen_mensual_despachos_clientes_grouped, merged_despachos_inventario, resumen_despachos_cliente_fact = (
-#         monthly_dispatch_summary(registro_salidas, dispatched_inventory, supplier_info))
-#
-#     if not resumen_mensual_ingresos_clientes.empty and not resumen_mensual_despachos_clientes_grouped.empty:
-#         resumen_mensual_ingresos_bodega, resumen_mensual_despachos_bodega = group_by_month_bodega(
-#             resumen_mensual_ingresos_clientes, resumen_mensual_despachos_clientes_grouped, start_date, end_date)
-#     else:
-#         print("\nCannot proceed with grouping by Bodega due to lack of data.\n")
-#
-#     saldo_inventory = insaldo_bode_comp(saldo_inventory)
-#
-#     print("\nMain: Analysing actual Inventory...\n")
-#
-#     if not saldo_inventory.empty and not supplier_info.empty:
-#         saldo_inv_cliente_fact = capacity_measured_in_cubic_meters(saldo_inventory, supplier_info)
-#         inventory_proportions_by_product(saldo_inventory, supplier_info)
-#         inventory_oldest_products(saldo_inventory, supplier_info)
-#     else:
-#         print("\nCannot proceed with inventory status calculations - Client currently has no "
-#               "product on any warehouse.\n")
-#
-#     print("\nMain: Reconstructing data for billing...\n")
-#
-#     if not saldo_inv_cliente_fact.empty:
-#         inflow_with_mode_historical, outflow_with_mode_historical = (
-#             billing_data_reconstruction(saldo_inv_cliente_fact, resumen_mensual_ingresos_fact,
-#                                         resumen_despachos_cliente_fact, start_date, end_date, registro_ingresos))
-#     else:
-#         print("\nCannot proceed with inventory status calculations - Client currently has no "
-#               "product on any warehouse.\n")
-#
-#     print("\nMain: Reconstructing historic Inventory data and behavior...\n")
-#
-#     inventory_over_time, inventory_ot_by_month = reconstruct_inventory_over_time(
-#         inflow_with_mode_historical,
-#         outflow_with_mode_historical, start_date=None, end_date=None
-#     )
-#
-#     selected_month_data = filtering_historic_insaldo(inventory_over_time, start_date, end_date)
-#
-#     print("\nMain: Calculating relevant KPIs for analysis...\n")
-#
-#     kpi_calculation(inventory_over_time, inventory_ot_by_month, start_date, end_date)
-#
-#     print("\nMain: Creating CBM and Pallets plot...\n")
-#
-#     plot_barchart_pallets(selected_month_data)
-#     plot_linechart_cbm(selected_month_data)
-#
-#     print("\nMain: Creating Report...\n")
-#
-#     # create_excel_report(selected_month_data)
-#
-#     app.run_server(debug=True, port=8050, use_reloader=False)
-#
-# if __name__ == "__main__":
-#     main()
+if __name__ == "__main__":
+    main()
