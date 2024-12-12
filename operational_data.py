@@ -123,8 +123,8 @@ def get_base_path():
 
 def get_base_output_path():
     if os.name == 'nt':  # Windows
-        # obase_path = r'C:\Users\melanie\Downloads'
-        obase_path = r'C:\Users\josemaria\Downloads'
+        obase_path = r'C:\Users\melanie\Downloads'
+        # obase_path = r'C:\Users\josemaria\Downloads'
 
     else:  # MacOS (or others)
         obase_path = r'/Users/j.m./Downloads'
@@ -679,6 +679,7 @@ def data_processing(wl_ingresos, rpshd_despachos, rpsdt_productos, registro_ingr
         rpsdt_productos['idubica'] = rpsdt_productos['idubica'].apply(
             lambda x: "DESCONOCIDO" if pd.isna(x) or str(x).strip() == "" else x)
 
+
         # Step 6: Filling NaNs
         time.sleep(1)  # Simulate a task
         progress.update(task, advance=1)
@@ -861,15 +862,27 @@ def data_screening(saldo_inventory, registro_ingresos, registro_salidas, rpsdt_p
         inmovih_table = inmovih_table.dropna(subset=['bodega'])
         registro_salidas = registro_salidas.dropna(subset=['bodega'])
 
+        output_path = os.path.join(get_base_output_path(), 'saldo_inventory.csv')
+        saldo_inventory.to_csv(output_path, index=False)
+
+        output_path = os.path.join(get_base_output_path(), 'registro_ingresos.csv')
+        registro_ingresos.to_csv(output_path, index=False)
+
+        output_path = os.path.join(get_base_output_path(), 'rpsdt_productos.csv')
+        rpsdt_productos.to_csv(output_path, index=False)
+
+        output_path = os.path.join(get_base_output_path(), 'inmovih_table.csv')
+        inmovih_table.to_csv(output_path, index=False)
+
+        output_path = os.path.join(get_base_output_path(), 'registro_salidas.csv')
+        registro_salidas.to_csv(output_path, index=False)
+
         # Step: Cleaning data
         time.sleep(1)  # Simulate a task
         progress.update(task, advance=1)
 
     print("Data Screening completed successfully.\n")
 
-    # Guardar resultados en excel
-    # output_path = r'C:\Users\josemaria\Downloads\registro_salidas_screening.csv'
-    # registro_salidas.to_csv(output_path, index=True)
 
     return (saldo_inventory, registro_ingresos, registro_salidas, rpsdt_productos, rpshd_despachos, wl_ingresos,
             inmovih_table, dispatched_inventory)
@@ -970,10 +983,9 @@ def monthly_receptions_summary(registro_ingresos, supplier_info, inventario_sin_
         time.sleep(1)  # Simulate a task
         progress.update(task, advance=1)
 
+        #Casting
         monthly_inventario_sin_filtro.loc[:, 'ddma'] = pd.to_numeric(monthly_inventario_sin_filtro['ddma'],
                                                                      errors='coerce')
-
-        # Convert 'idcontacto' in both DataFrames to strings
         monthly_registro_ingresos.loc[:, 'idcontacto'] = monthly_registro_ingresos['idcontacto'].astype(str).str.strip()
         monthly_inventario_sin_filtro.loc[:, 'idcontacto'] = monthly_inventario_sin_filtro['idcontacto'].astype(
             str).str.strip()
@@ -1132,6 +1144,12 @@ def monthly_receptions_summary(registro_ingresos, supplier_info, inventario_sin_
         time.sleep(1)  # Simulate a task
         progress.update(task, advance=1)
 
+        output_path = os.path.join(get_base_output_path(), 'resumen_mensual_ingresos.csv')
+        resumen_mensual_ingresos.to_csv(output_path, index=True)
+        output_path = os.path.join(get_base_output_path(), 'resumen_mensual_ingresos_sd.csv')
+        resumen_mensual_ingresos_sd.to_csv(output_path, index=True)
+
+
         # Merge dataframe with incontac to obtain client name
         resumen_mensual_ingresos_clientes = pd.merge(resumen_mensual_ingresos, supplier_info, on='idcontacto',
                                                      how='left')
@@ -1142,6 +1160,7 @@ def monthly_receptions_summary(registro_ingresos, supplier_info, inventario_sin_
 
         resumen_mensual_ingresos_clientes['descrip'] = resumen_mensual_ingresos_clientes.rename(
             columns={'descrip': 'Cliente'}, inplace=True)
+
 
         # print("Ingresos mensuales por idcliente y Bodega (agrupado 1):\n", resumen_mensual_ingresos_clientes)
 
@@ -1159,8 +1178,6 @@ def monthly_receptions_summary(registro_ingresos, supplier_info, inventario_sin_
         time.sleep(1)  # Simulate a task
         progress.update(task, advance=1)
 
-        output_path = os.path.join(get_base_output_path(), 'ingresos_cliente_bodega_historico.csv')
-        resumen_mensual_ingresos_clientes.to_csv(output_path, index=True)
 
         # Step: Printing CSV data
         time.sleep(1)  # Simulate a task
@@ -1345,6 +1362,12 @@ def group_by_month_bodega(resumen_mensual_ingresos_clientes, resumen_mensual_des
     resumen_mensual_despachos_clientes['fecha'] = pd.to_datetime(resumen_mensual_despachos_clientes['fecha_x'],
                                                                  errors='coerce')
 
+    # Save the final DataFrame to CSV
+    output_path = os.path.join(get_base_output_path(), 'resumen_historico_ingresos_clientes.csv')
+    resumen_mensual_ingresos_clientes.to_csv(output_path, index=False)
+    output_path = os.path.join(get_base_output_path(), 'resumen_historico_despachos_clientes.csv')
+    resumen_mensual_despachos_clientes.to_csv(output_path, index=False)
+
     # Filter data within the date range
     resumen_mensual_ingresos_clientes = resumen_mensual_ingresos_clientes[
         (resumen_mensual_ingresos_clientes['fecha'] >= start_date) & (
@@ -1354,6 +1377,11 @@ def group_by_month_bodega(resumen_mensual_ingresos_clientes, resumen_mensual_des
         (resumen_mensual_despachos_clientes['fecha'] >= start_date) & (
                 resumen_mensual_despachos_clientes['fecha'] <= end_date)
         ]
+
+    # Save the final DataFrame to CSV
+    output_path = os.path.join(get_base_output_path(), 'resumen_mensual_ingresos_clientes.csv')
+    resumen_mensual_ingresos_clientes.to_csv(output_path, index=False)
+
 
     # Group by 'year_month' and 'Bodega' and then sum the relevant columns
     grouped_resumen_mensual_ingresos = resumen_mensual_ingresos_clientes.groupby(['Bodega']).agg(
@@ -1517,6 +1545,10 @@ def billing_data_reconstruction(saldo_inv_cliente_fact, resumen_mensual_ingresos
         # Replace values in 'idubica1' that start with 'R' with an empty string
         saldo_inv_cliente_fact['idubica1'] = saldo_inv_cliente_fact['idubica1'].str.replace(r'^R.*', '', regex=True)
         saldo_inv_cliente_fact['idubica1'] = saldo_inv_cliente_fact['idubica1'].str.replace(r'^TM.*', '', regex=True)
+
+        # Replace values in 'idubica1' that do not start with 'TA' with an empty string
+        mask = ~saldo_inv_cliente_fact['idubica1'].str.startswith('TA', na=False)
+        saldo_inv_cliente_fact.loc[mask, 'idubica1'] = ''
 
         # Step:
         time.sleep(1)  # Simulate a task
@@ -1994,7 +2026,7 @@ def billing_data_reconstruction(saldo_inv_cliente_fact, resumen_mensual_ingresos
         progress.update(task, advance=1)
 
         # Calculate the number of days
-        outflow_with_mode['Days'] = (outflow_with_mode['fecha_x'] - outflow_with_mode['fecha_y']).dt.days + 1
+        outflow_with_mode['Days'] = abs((outflow_with_mode['fecha_x'] - outflow_with_mode['fecha_y']).dt.days) + 1
 
         # Keep the historical df for further purposes.
         outflow_with_mode_historical = outflow_with_mode
@@ -3141,8 +3173,8 @@ def main():
     if analysis_type == 'W' and entity_id is not None:
         # List of DataFrames to filter by warehouse
         dataframes_to_filter = [wl_ingresos, rpshd_despachos, rpsdt_productos,
-                                registro_ingresos, registro_salidas, inmovih_table, saldo_inventory,
-                                dispatched_inventory, inventario_sin_filtro]
+                                registro_ingresos, registro_salidas, inmovih_table, saldo_inventory
+                                ]
 
         # Filter DataFrames based on the selected warehouse
         filtered_dataframes = filter_dataframes_by_warehouse(dataframes_to_filter, entity_id)
@@ -3152,14 +3184,13 @@ def main():
         for name, df in zip([
             'wl_ingresos', 'rpshd_despachos', 'rpsdt_productos',
             'registro_ingresos', 'registro_salidas', 'inmovih_table',
-            'saldo_inventory', 'dispatched_inventory', 'inventario_sin_filtro'
+            'saldo_inventory'
         ], filtered_dataframes):
             print(f"{name} (Filtered by Warehouse):\n", df.head(), "\n")
 
         # Unpack filtered DataFrames
         (wl_ingresos, rpshd_despachos, rpsdt_productos,
-         registro_ingresos, registro_salidas, inmovih_table, saldo_inventory,
-         dispatched_inventory, inventario_sin_filtro) = filtered_dataframes
+         registro_ingresos, registro_salidas, inmovih_table, saldo_inventory) = filtered_dataframes
 
     print("\nMain: Generating all reception data by warehouse and client...\n")
 
