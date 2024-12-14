@@ -862,21 +862,6 @@ def data_screening(saldo_inventory, registro_ingresos, registro_salidas, rpsdt_p
         inmovih_table = inmovih_table.dropna(subset=['bodega'])
         registro_salidas = registro_salidas.dropna(subset=['bodega'])
 
-        output_path = os.path.join(get_base_output_path(), 'saldo_inventory.csv')
-        saldo_inventory.to_csv(output_path, index=False)
-
-        output_path = os.path.join(get_base_output_path(), 'registro_ingresos.csv')
-        registro_ingresos.to_csv(output_path, index=False)
-
-        output_path = os.path.join(get_base_output_path(), 'rpsdt_productos.csv')
-        rpsdt_productos.to_csv(output_path, index=False)
-
-        output_path = os.path.join(get_base_output_path(), 'inmovih_table.csv')
-        inmovih_table.to_csv(output_path, index=False)
-
-        output_path = os.path.join(get_base_output_path(), 'registro_salidas.csv')
-        registro_salidas.to_csv(output_path, index=False)
-
         # Step: Cleaning data
         time.sleep(1)  # Simulate a task
         progress.update(task, advance=1)
@@ -962,6 +947,11 @@ def monthly_receptions_summary(registro_ingresos, supplier_info, inventario_sin_
         inventario_sin_filtro['idcontacto'] = inventario_sin_filtro['idcontacto'].astype(str)
         inventario_sin_filtro['idingreso'] = inventario_sin_filtro['idingreso'].astype(str)
 
+        output_path = os.path.join(get_base_output_path(), 'registro_ingresos_monthly_summary.csv')
+        registro_ingresos.to_csv(output_path, index=True)
+        output_path = os.path.join(get_base_output_path(), 'inventario_sin_filtro_montly_summary.csv')
+        inventario_sin_filtro.to_csv(output_path, index=True)
+
         # Step: Preparing data
         time.sleep(1)  # Simulate a task
         progress.update(task, advance=1)
@@ -1039,6 +1029,47 @@ def monthly_receptions_summary(registro_ingresos, supplier_info, inventario_sin_
         merged_ingresos_inventario.to_csv(output_path, index=True)
 
 
+        # # Create a filtered DataFrame excluding 'DESCONOCIDO'
+        # filtered_bodegas = merged_ingresos_inventario[merged_ingresos_inventario['bodega'] != 'DESCONOCIDO']
+        #
+        # # Find replacement bodega for each idcontacto_x where there is exactly one unique bodega
+        # replacement_bodega = filtered_bodegas.groupby('idcontacto_x').filter(lambda x: len(x['bodega'].unique()) == 1)
+        # replacement_bodega = replacement_bodega.groupby('idcontacto_x')['bodega'].first()
+        #
+        # # Create mask for rows where bodega is 'DESCONOCIDO' and valid replacement exists
+        # mask = (merged_ingresos_inventario['bodega'] == 'DESCONOCIDO') & merged_ingresos_inventario[
+        #     'idcontacto_x'].isin(
+        #     replacement_bodega.index)
+        #
+        # # Apply the replacement
+        # merged_ingresos_inventario.loc[mask, 'bodega'] = merged_ingresos_inventario.loc[mask, 'idcontacto_x'].map(
+        #     replacement_bodega)
+        #
+        #
+        # # Save eligible rows for replacement
+        # eligible_rows_path = os.path.join(get_base_output_path(), 'eligible_rows.csv')
+        # eligible_rows = merged_ingresos_inventario.loc[mask]
+        # eligible_rows.to_csv(eligible_rows_path, index=True)
+        #
+        # # Apply the replacement
+        # merged_ingresos_inventario.loc[mask, 'bodega'] = merged_ingresos_inventario.loc[mask, 'idcontacto_x'].map(
+        #     replacement_bodega)
+        #
+        # # Save successfully replaced rows
+        # replaced_rows_path = os.path.join(get_base_output_path(), 'replaced_rows.csv')
+        # replaced_rows = merged_ingresos_inventario.loc[mask]
+        # replaced_rows.to_csv(replaced_rows_path, index=True)
+        #
+        # # Save rows that remain unchanged
+        # remaining_rows_path = os.path.join(get_base_output_path(), 'remaining_rows.csv')
+        # remaining_rows = merged_ingresos_inventario[merged_ingresos_inventario['bodega'] == 'DESCONOCIDO']
+        # remaining_rows.to_csv(remaining_rows_path, index=True)
+        #
+        # # Save the entire DataFrame after processing
+        # final_output_path = os.path.join(get_base_output_path(), 'merged_ingresos_inventario_after_mask.csv')
+        # merged_ingresos_inventario.to_csv(final_output_path, index=True)
+        #
+
         # Create a filtered DataFrame excluding 'DESCONOCIDO'
         filtered_bodegas = merged_ingresos_inventario[merged_ingresos_inventario['bodega'] != 'DESCONOCIDO']
 
@@ -1048,20 +1079,70 @@ def monthly_receptions_summary(registro_ingresos, supplier_info, inventario_sin_
 
         # Create mask for rows where bodega is 'DESCONOCIDO' and valid replacement exists
         mask = (merged_ingresos_inventario['bodega'] == 'DESCONOCIDO') & merged_ingresos_inventario[
-            'idcontacto_x'].isin(
-            replacement_bodega.index)
+            'idcontacto_x'].isin(replacement_bodega.index)
 
         # Apply the replacement
         merged_ingresos_inventario.loc[mask, 'bodega'] = merged_ingresos_inventario.loc[mask, 'idcontacto_x'].map(
             replacement_bodega)
 
+        # Save eligible rows for replacement
+        eligible_rows_path = os.path.join(get_base_output_path(), 'eligible_rows.csv')
+        eligible_rows = merged_ingresos_inventario.loc[mask]
+        eligible_rows.to_csv(eligible_rows_path, index=True)
+
+        # Apply the replacement
+        merged_ingresos_inventario.loc[mask, 'bodega'] = merged_ingresos_inventario.loc[mask, 'idcontacto_x'].map(
+            replacement_bodega)
+
+        # Save successfully replaced rows
+        replaced_rows_path = os.path.join(get_base_output_path(), 'replaced_rows.csv')
+        replaced_rows = merged_ingresos_inventario.loc[mask]
+        replaced_rows.to_csv(replaced_rows_path, index=True)
+
+        # Save rows that remain unchanged
+        remaining_rows_path = os.path.join(get_base_output_path(), 'remaining_rows.csv')
+        remaining_rows = merged_ingresos_inventario[merged_ingresos_inventario['bodega'] == 'DESCONOCIDO']
+        remaining_rows.to_csv(remaining_rows_path, index=True)
+
+        # Save the entire DataFrame after processing
+        final_output_path = os.path.join(get_base_output_path(), 'merged_ingresos_inventario_after_mask.csv')
+        merged_ingresos_inventario.to_csv(final_output_path, index=True)
+
+        # --- Debugging Starts Here ---
+
+        # Step 1: Check 'bodega' unique values
+        print("Unique values in 'bodega':", merged_ingresos_inventario['bodega'].unique())
+        print("Count of 'DESCONOCIDO' in 'bodega':", (merged_ingresos_inventario['bodega'] == 'DESCONOCIDO').sum())
+
+        # Step 2: Check replacement bodega
+        print("Replacement Bodega:\n", replacement_bodega)
+
+        # Step 3: Validate mask
+        print("Mask (rows that should be replaced):\n", mask.sum())  # Count of rows matching the mask
+        if mask.sum() > 0:
+            print("Rows matching the mask:\n", merged_ingresos_inventario.loc[mask])
+
+        # Step 4: Check filtered bodega groups
+        filtered_groups = filtered_bodegas.groupby('idcontacto_x').agg({'bodega': 'nunique'})
+        print("Number of unique 'bodega' values per group:\n", filtered_groups)
+
+        # Step 5: Check remaining 'DESCONOCIDO' rows
+        print("Remaining rows with 'DESCONOCIDO':\n", remaining_rows)
+
+        # Step 6: Debug mapping values
+        print("Mapped replacement values for rows in the mask:\n",
+              merged_ingresos_inventario.loc[mask, 'idcontacto_x'].map(replacement_bodega))
+
+        # Save filtered groups for analysis (optional)
+        filtered_groups_path = os.path.join(get_base_output_path(), 'filtered_groups.csv')
+        filtered_groups.to_csv(filtered_groups_path)
+        print(f"Filtered groups saved to: {filtered_groups_path}")
+
+
+
         # Step: Replacing unknown data
         time.sleep(1)  # Simulate a task
         progress.update(task, advance=1)
-
-        output_path = os.path.join(get_base_output_path(), 'merged_ingresos_inventario_after_mask.csv')
-        merged_ingresos_inventario.to_csv(output_path, index=True)
-
 
         merged_ingresos_inventario = merged_ingresos_inventario[[
             'idingreso', 'itemno', 'fecha_x', 'descrip', 'idcontacto_x', 'bodega', 'idubica_y', 'idubica_x', 'idmodelo',
@@ -1151,12 +1232,6 @@ def monthly_receptions_summary(registro_ingresos, supplier_info, inventario_sin_
         # Step: Complementing CBM data with partial shipments
         time.sleep(1)  # Simulate a task
         progress.update(task, advance=1)
-
-        output_path = os.path.join(get_base_output_path(), 'resumen_mensual_ingresos.csv')
-        resumen_mensual_ingresos.to_csv(output_path, index=True)
-        output_path = os.path.join(get_base_output_path(), 'resumen_mensual_ingresos_sd.csv')
-        resumen_mensual_ingresos_sd.to_csv(output_path, index=True)
-
 
         # Merge dataframe with incontac to obtain client name
         resumen_mensual_ingresos_clientes = pd.merge(resumen_mensual_ingresos, supplier_info, on='idcontacto',
@@ -1289,30 +1364,6 @@ def monthly_dispatch_summary(registro_salidas, dispatched_inventory, supplier_in
             replacement_bodega.index)
         merged_despachos_inventario.loc[mask, 'bodega'] = merged_despachos_inventario.loc[mask, 'idcontacto_x'].map(
             replacement_bodega)
-
-        # Save eligible rows for replacement
-        eligible_rows_path = os.path.join(get_base_output_path(), 'eligible_rows.csv')
-        eligible_rows = merged_despachos_inventario.loc[mask]
-        eligible_rows.to_csv(eligible_rows_path, index=True)
-
-        # Apply the replacement
-        merged_despachos_inventario.loc[mask, 'bodega'] = merged_despachos_inventario.loc[mask, 'idcontacto_x'].map(
-            replacement_bodega)
-
-        # Save successfully replaced rows
-        replaced_rows_path = os.path.join(get_base_output_path(), 'replaced_rows.csv')
-        replaced_rows = merged_despachos_inventario.loc[mask]
-        replaced_rows.to_csv(replaced_rows_path, index=True)
-
-        # Save rows that remain unchanged
-        remaining_rows_path = os.path.join(get_base_output_path(), 'remaining_rows.csv')
-        remaining_rows = merged_despachos_inventario[merged_despachos_inventario['bodega'] == 'DESCONOCIDO']
-        remaining_rows.to_csv(remaining_rows_path, index=True)
-
-        # Save the entire DataFrame after processing
-        final_output_path = os.path.join(get_base_output_path(), 'merged_despachos_inventario_after_mask.csv')
-        merged_despachos_inventario.to_csv(final_output_path, index=True)
-
 
 
         # Step: Identifying unknowns and cleaning data
