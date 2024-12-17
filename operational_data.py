@@ -44,6 +44,7 @@ def filter_dataframes_by_idcontacto(dataframes, idcontacto):
             filtered_dataframes.append(df)
     return filtered_dataframes
 
+
 def filter_dataframes_by_warehouse(dataframes, warehouse):
     filtered_dataframes = []
     for df in dataframes:
@@ -63,6 +64,7 @@ def filter_dataframes_by_warehouse(dataframes, warehouse):
             # If 'bodega' not in columns, keep the DataFrame as is
             filtered_dataframes.append(df)
     return filtered_dataframes
+
 
 # Function to resolve Bodega conflicts
 def resolve_bodega(row):
@@ -111,6 +113,91 @@ def resolve_bodega(row):
 
     # All other cases as incoherent
     return "INCOHERENT VALUES"
+
+
+def handle_unknown_bodega(merged_ingresos_inventario):
+    """
+    Handles rows with 'DESCONOCIDO' in the 'bodega' column.
+
+    Args:
+        merged_ingresos_inventario (pd.DataFrame): The merged DataFrame with `bodega` and other columns.
+
+    Returns:
+        pd.DataFrame: Updated DataFrame after handling 'DESCONOCIDO' values.
+        pd.DataFrame: Eligible rows for replacement.
+        pd.DataFrame: Rows successfully replaced.
+        pd.DataFrame: Remaining rows with 'DESCONOCIDO'.
+    """
+    base_output_path = get_base_output_path()
+
+    print("Columns in the DataFrame:", merged_ingresos_inventario.columns)
+
+
+    # Create a filtered DataFrame excluding 'DESCONOCIDO'
+    filtered_bodegas = merged_ingresos_inventario[merged_ingresos_inventario['bodega'] != 'DESCONOCIDO']
+
+    # Find replacement bodega for each idcontacto_x where there is exactly one unique bodega
+    replacement_bodega = filtered_bodegas.groupby('idcontacto').filter(lambda x: len(x['bodega'].unique()) == 1)
+    replacement_bodega = replacement_bodega.groupby('idcontacto')['bodega'].first()
+
+    # Create mask for rows where bodega is 'DESCONOCIDO' and valid replacement exists
+    mask = (merged_ingresos_inventario['bodega'] == 'DESCONOCIDO') & \
+           merged_ingresos_inventario['idcontacto'].isin(replacement_bodega.index)
+
+    # Save eligible rows for replacement
+    eligible_rows = merged_ingresos_inventario.loc[mask]
+    eligible_rows_path = os.path.join(base_output_path, 'eligible_rows.csv')
+    eligible_rows.to_csv(eligible_rows_path, index=True)
+
+    # Apply the replacement
+    merged_ingresos_inventario.loc[mask, 'bodega'] = merged_ingresos_inventario.loc[mask, 'idcontacto'].map(
+        replacement_bodega)
+
+    # Save successfully replaced rows
+    replaced_rows = merged_ingresos_inventario.loc[mask]
+    replaced_rows_path = os.path.join(base_output_path, 'replaced_rows.csv')
+    replaced_rows.to_csv(replaced_rows_path, index=True)
+
+    # Save rows that remain unchanged
+    remaining_rows = merged_ingresos_inventario[merged_ingresos_inventario['bodega'] == 'DESCONOCIDO']
+    remaining_rows_path = os.path.join(base_output_path, 'remaining_rows.csv')
+    remaining_rows.to_csv(remaining_rows_path, index=True)
+
+    # Save the entire DataFrame after processing
+    final_output_path = os.path.join(base_output_path, 'merged_ingresos_inventario_after_mask.csv')
+    merged_ingresos_inventario.to_csv(final_output_path, index=True)
+
+    # # --- Debugging Starts Here ---
+    #
+    # # Step 1: Check 'bodega' unique values
+    # print("Unique values in 'bodega':", merged_ingresos_inventario['bodega'].unique())
+    # print("Count of 'DESCONOCIDO' in 'bodega':", (merged_ingresos_inventario['bodega'] == 'DESCONOCIDO').sum())
+    #
+    # # Step 2: Check replacement bodega
+    # print("Replacement Bodega:\n", replacement_bodega)
+    #
+    # # Step 3: Validate mask
+    # print("Mask (rows that should be replaced):\n", mask.sum())  # Count of rows matching the mask
+    # if mask.sum() > 0:
+    #     print("Rows matching the mask:\n", merged_ingresos_inventario.loc[mask])
+    #
+    # # Step 4: Check filtered bodega groups
+    # filtered_groups = filtered_bodegas.groupby('idcontacto').agg({'bodega': 'nunique'})
+    # print("Number of unique 'bodega' values per group:\n", filtered_groups)
+    #
+    # # Step 5: Check remaining 'DESCONOCIDO' rows
+    # print("Remaining rows with 'DESCONOCIDO':\n", remaining_rows)
+    #
+    # # Step 6: Debug mapping values
+    # print("Mapped replacement values for rows in the mask:\n",
+    #       merged_ingresos_inventario.loc[mask, 'idcontacto'].map(replacement_bodega))
+    #
+    # # Save filtered groups for analysis (optional)
+    # filtered_groups_path = os.path.join(get_base_output_path(), 'filtered_groups.csv')
+    # filtered_groups.to_csv(filtered_groups_path)
+    # print(f"Filtered groups saved to: {filtered_groups_path}")
+
+    return merged_ingresos_inventario, eligible_rows, replaced_rows, remaining_rows
 
 
 # Determinar el área de análisis
@@ -679,7 +766,6 @@ def data_processing(wl_ingresos, rpshd_despachos, rpsdt_productos, registro_ingr
         rpsdt_productos['idubica'] = rpsdt_productos['idubica'].apply(
             lambda x: "DESCONOCIDO" if pd.isna(x) or str(x).strip() == "" else x)
 
-
         # Step 6: Filling NaNs
         time.sleep(1)  # Simulate a task
         progress.update(task, advance=1)
@@ -737,7 +823,7 @@ def data_screening(saldo_inventory, registro_ingresos, registro_salidas, rpsdt_p
         time.sleep(1)  # Simulate a task
         progress.update(task, advance=1)
 
-        # saldo_inventory['idubica'] = saldo_inventory['idubica'].astype(str)
+        # Apply the location assignment logic to `saldo_inventory`
         saldo_inventory['bodega'] = saldo_inventory['idubica'].apply(asignar_ubicacion)
 
         # Step: Locating objects
@@ -862,12 +948,36 @@ def data_screening(saldo_inventory, registro_ingresos, registro_salidas, rpsdt_p
         inmovih_table = inmovih_table.dropna(subset=['bodega'])
         registro_salidas = registro_salidas.dropna(subset=['bodega'])
 
+        saldo_inventory['idcontacto'] = saldo_inventory['idcontacto'].astype(str).fillna('')
+        registro_ingresos['idcontacto'] = registro_ingresos['idcontacto'].astype(str).fillna('')
+        wl_ingresos['idcontacto'] = wl_ingresos['idcontacto'].astype(str).fillna('')
+        rpsdt_productos['idcontacto'] = rpsdt_productos['idcontacto'].astype(str).fillna('')
+        registro_salidas['idcontacto'] = registro_salidas['idcontacto'].astype(str).fillna('')
+        inmovih_table['idcontacto'] = inmovih_table['idcontacto'].astype(str).fillna('')
+
+        # Final Step: Updating `bodega` based on `idcontacto`
+        def update_bodega_based_on_idcontacto(row):
+            idcontacto = str(row['idcontacto']) if pd.notna(row['idcontacto']) else ''
+
+            if row['idcontacto'].endswith('_c') and row['bodega'] != 'BODC':
+                return 'BODC'
+            elif row['idcontacto'].endswith('_e') and row['bodega'] != 'BODE':
+                return 'BODE'
+            elif row['idcontacto'].endswith('_opl') and row['bodega'] != 'OPL':
+                return 'OPL'
+            else:
+                return row['bodega']
+
+        # Apply the logic to update `bodega` for all relevant DataFrames
+        for df in [saldo_inventory, registro_ingresos, registro_salidas, rpsdt_productos,
+                   inmovih_table, registro_salidas]:
+            df['bodega'] = df.apply(update_bodega_based_on_idcontacto, axis=1)
+
         # Step: Cleaning data
         time.sleep(1)  # Simulate a task
         progress.update(task, advance=1)
 
     print("Data Screening completed successfully.\n")
-
 
     return (saldo_inventory, registro_ingresos, registro_salidas, rpsdt_productos, rpshd_despachos, wl_ingresos,
             inmovih_table, dispatched_inventory)
@@ -973,7 +1083,7 @@ def monthly_receptions_summary(registro_ingresos, supplier_info, inventario_sin_
         time.sleep(1)  # Simulate a task
         progress.update(task, advance=1)
 
-        #Casting
+        # Casting
         monthly_inventario_sin_filtro.loc[:, 'ddma'] = pd.to_numeric(monthly_inventario_sin_filtro['ddma'],
                                                                      errors='coerce')
         monthly_registro_ingresos.loc[:, 'idcontacto'] = monthly_registro_ingresos['idcontacto'].astype(str).str.strip()
@@ -1015,6 +1125,7 @@ def monthly_receptions_summary(registro_ingresos, supplier_info, inventario_sin_
         time.sleep(1)  # Simulate a task
         progress.update(task, advance=1)
 
+        # Create dup_key
         merged_ingresos_inventario['dup_key'] = (merged_ingresos_inventario['idingreso'] +
                                                  merged_ingresos_inventario['itemno'])
 
@@ -1028,7 +1139,6 @@ def monthly_receptions_summary(registro_ingresos, supplier_info, inventario_sin_
         output_path = os.path.join(get_base_output_path(), 'merged_ingresos_inventario_before_mask.csv')
         merged_ingresos_inventario.to_csv(output_path, index=True)
 
-
         # # Create a filtered DataFrame excluding 'DESCONOCIDO'
         # filtered_bodegas = merged_ingresos_inventario[merged_ingresos_inventario['bodega'] != 'DESCONOCIDO']
         #
@@ -1038,13 +1148,11 @@ def monthly_receptions_summary(registro_ingresos, supplier_info, inventario_sin_
         #
         # # Create mask for rows where bodega is 'DESCONOCIDO' and valid replacement exists
         # mask = (merged_ingresos_inventario['bodega'] == 'DESCONOCIDO') & merged_ingresos_inventario[
-        #     'idcontacto_x'].isin(
-        #     replacement_bodega.index)
+        #     'idcontacto_x'].isin(replacement_bodega.index)
         #
         # # Apply the replacement
         # merged_ingresos_inventario.loc[mask, 'bodega'] = merged_ingresos_inventario.loc[mask, 'idcontacto_x'].map(
         #     replacement_bodega)
-        #
         #
         # # Save eligible rows for replacement
         # eligible_rows_path = os.path.join(get_base_output_path(), 'eligible_rows.csv')
@@ -1069,76 +1177,35 @@ def monthly_receptions_summary(registro_ingresos, supplier_info, inventario_sin_
         # final_output_path = os.path.join(get_base_output_path(), 'merged_ingresos_inventario_after_mask.csv')
         # merged_ingresos_inventario.to_csv(final_output_path, index=True)
         #
-
-        # Create a filtered DataFrame excluding 'DESCONOCIDO'
-        filtered_bodegas = merged_ingresos_inventario[merged_ingresos_inventario['bodega'] != 'DESCONOCIDO']
-
-        # Find replacement bodega for each idcontacto_x where there is exactly one unique bodega
-        replacement_bodega = filtered_bodegas.groupby('idcontacto_x').filter(lambda x: len(x['bodega'].unique()) == 1)
-        replacement_bodega = replacement_bodega.groupby('idcontacto_x')['bodega'].first()
-
-        # Create mask for rows where bodega is 'DESCONOCIDO' and valid replacement exists
-        mask = (merged_ingresos_inventario['bodega'] == 'DESCONOCIDO') & merged_ingresos_inventario[
-            'idcontacto_x'].isin(replacement_bodega.index)
-
-        # Apply the replacement
-        merged_ingresos_inventario.loc[mask, 'bodega'] = merged_ingresos_inventario.loc[mask, 'idcontacto_x'].map(
-            replacement_bodega)
-
-        # Save eligible rows for replacement
-        eligible_rows_path = os.path.join(get_base_output_path(), 'eligible_rows.csv')
-        eligible_rows = merged_ingresos_inventario.loc[mask]
-        eligible_rows.to_csv(eligible_rows_path, index=True)
-
-        # Apply the replacement
-        merged_ingresos_inventario.loc[mask, 'bodega'] = merged_ingresos_inventario.loc[mask, 'idcontacto_x'].map(
-            replacement_bodega)
-
-        # Save successfully replaced rows
-        replaced_rows_path = os.path.join(get_base_output_path(), 'replaced_rows.csv')
-        replaced_rows = merged_ingresos_inventario.loc[mask]
-        replaced_rows.to_csv(replaced_rows_path, index=True)
-
-        # Save rows that remain unchanged
-        remaining_rows_path = os.path.join(get_base_output_path(), 'remaining_rows.csv')
-        remaining_rows = merged_ingresos_inventario[merged_ingresos_inventario['bodega'] == 'DESCONOCIDO']
-        remaining_rows.to_csv(remaining_rows_path, index=True)
-
-        # Save the entire DataFrame after processing
-        final_output_path = os.path.join(get_base_output_path(), 'merged_ingresos_inventario_after_mask.csv')
-        merged_ingresos_inventario.to_csv(final_output_path, index=True)
-
-        # --- Debugging Starts Here ---
-
-        # Step 1: Check 'bodega' unique values
-        print("Unique values in 'bodega':", merged_ingresos_inventario['bodega'].unique())
-        print("Count of 'DESCONOCIDO' in 'bodega':", (merged_ingresos_inventario['bodega'] == 'DESCONOCIDO').sum())
-
-        # Step 2: Check replacement bodega
-        print("Replacement Bodega:\n", replacement_bodega)
-
-        # Step 3: Validate mask
-        print("Mask (rows that should be replaced):\n", mask.sum())  # Count of rows matching the mask
-        if mask.sum() > 0:
-            print("Rows matching the mask:\n", merged_ingresos_inventario.loc[mask])
-
-        # Step 4: Check filtered bodega groups
-        filtered_groups = filtered_bodegas.groupby('idcontacto_x').agg({'bodega': 'nunique'})
-        print("Number of unique 'bodega' values per group:\n", filtered_groups)
-
-        # Step 5: Check remaining 'DESCONOCIDO' rows
-        print("Remaining rows with 'DESCONOCIDO':\n", remaining_rows)
-
-        # Step 6: Debug mapping values
-        print("Mapped replacement values for rows in the mask:\n",
-              merged_ingresos_inventario.loc[mask, 'idcontacto_x'].map(replacement_bodega))
-
-        # Save filtered groups for analysis (optional)
-        filtered_groups_path = os.path.join(get_base_output_path(), 'filtered_groups.csv')
-        filtered_groups.to_csv(filtered_groups_path)
-        print(f"Filtered groups saved to: {filtered_groups_path}")
-
-
+        # # --- Debugging Starts Here ---
+        #
+        # # Step 1: Check 'bodega' unique values
+        # print("Unique values in 'bodega':", merged_ingresos_inventario['bodega'].unique())
+        # print("Count of 'DESCONOCIDO' in 'bodega':", (merged_ingresos_inventario['bodega'] == 'DESCONOCIDO').sum())
+        #
+        # # Step 2: Check replacement bodega
+        # print("Replacement Bodega:\n", replacement_bodega)
+        #
+        # # Step 3: Validate mask
+        # print("Mask (rows that should be replaced):\n", mask.sum())  # Count of rows matching the mask
+        # if mask.sum() > 0:
+        #     print("Rows matching the mask:\n", merged_ingresos_inventario.loc[mask])
+        #
+        # # Step 4: Check filtered bodega groups
+        # filtered_groups = filtered_bodegas.groupby('idcontacto_x').agg({'bodega': 'nunique'})
+        # print("Number of unique 'bodega' values per group:\n", filtered_groups)
+        #
+        # # Step 5: Check remaining 'DESCONOCIDO' rows
+        # print("Remaining rows with 'DESCONOCIDO':\n", remaining_rows)
+        #
+        # # Step 6: Debug mapping values
+        # print("Mapped replacement values for rows in the mask:\n",
+        #       merged_ingresos_inventario.loc[mask, 'idcontacto_x'].map(replacement_bodega))
+        #
+        # # Save filtered groups for analysis (optional)
+        # filtered_groups_path = os.path.join(get_base_output_path(), 'filtered_groups.csv')
+        # filtered_groups.to_csv(filtered_groups_path)
+        # print(f"Filtered groups saved to: {filtered_groups_path}")
 
         # Step: Replacing unknown data
         time.sleep(1)  # Simulate a task
@@ -1244,7 +1311,6 @@ def monthly_receptions_summary(registro_ingresos, supplier_info, inventario_sin_
         resumen_mensual_ingresos_clientes['descrip'] = resumen_mensual_ingresos_clientes.rename(
             columns={'descrip': 'Cliente'}, inplace=True)
 
-
         # print("Ingresos mensuales por idcliente y Bodega (agrupado 1):\n", resumen_mensual_ingresos_clientes)
 
         # Continue with your aggregation, now grouping by 'month' as well
@@ -1261,10 +1327,14 @@ def monthly_receptions_summary(registro_ingresos, supplier_info, inventario_sin_
         time.sleep(1)  # Simulate a task
         progress.update(task, advance=1)
 
-
         # Step: Printing CSV data
         time.sleep(1)  # Simulate a task
         progress.update(task, advance=1)
+
+        output_path = os.path.join(get_base_output_path(), 'resumen_mensual_ingresos_fact.csv')
+        resumen_mensual_ingresos_fact.to_csv(output_path, index=True)
+        output_path = os.path.join(get_base_output_path(), 'resumen_mensual_ingresos_sd.csv')
+        resumen_mensual_ingresos_sd.to_csv(output_path, index=True)
 
     print("Historic inflow of CBM, pallets and units by client and warehouse:\n", resumen_mensual_ingresos_clientes)
     print("Monthly reception data processed correctly.\n")
@@ -1365,7 +1435,6 @@ def monthly_dispatch_summary(registro_salidas, dispatched_inventory, supplier_in
         merged_despachos_inventario.loc[mask, 'bodega'] = merged_despachos_inventario.loc[mask, 'idcontacto_x'].map(
             replacement_bodega)
 
-
         # Step: Identifying unknowns and cleaning data
         time.sleep(1)  # Simulate a task
         progress.update(task, advance=1)
@@ -1465,7 +1534,6 @@ def group_by_month_bodega(resumen_mensual_ingresos_clientes, resumen_mensual_des
     # Save the final DataFrame to CSV
     output_path = os.path.join(get_base_output_path(), 'resumen_mensual_ingresos_clientes.csv')
     resumen_mensual_ingresos_clientes.to_csv(output_path, index=False)
-
 
     # Group by 'year_month' and 'Bodega' and then sum the relevant columns
     grouped_resumen_mensual_ingresos = resumen_mensual_ingresos_clientes.groupby(['Bodega']).agg(
@@ -2651,7 +2719,7 @@ def reconstruct_inventory_over_time(
         daily_inflows = inflow_with_mode_historical.groupby(['fecha_x', 'idcontacto', 'idingreso', 'idmodelo']).agg({
             'inicial': 'sum',
             'pesokgs': 'sum',
-            'pallets_final': 'first'  #no. de palets
+            'pallets_final': 'first'  # no. de palets
         }).reset_index()
 
         # Step:
@@ -2677,11 +2745,12 @@ def reconstruct_inventory_over_time(
         }, inplace=True)
 
         # Aggregate daily outflows
-        daily_outflows = outflow_with_mode_historical.groupby(['fecha_x', 'idcontacto_x', 'trannum', 'idmodelo_x']).agg({
-            'cantidad': 'sum',
-            'pesokgs': 'sum',
-            'calculated_pallets': 'first'
-        }).reset_index()
+        daily_outflows = outflow_with_mode_historical.groupby(['fecha_x', 'idcontacto_x', 'trannum', 'idmodelo_x']).agg(
+            {
+                'cantidad': 'sum',
+                'pesokgs': 'sum',
+                'calculated_pallets': 'first'
+            }).reset_index()
 
         # Step:
         time.sleep(1)  # Simulate a task
@@ -2861,8 +2930,9 @@ def reconstruct_inventory_over_time(
 
         # Compute Opening Inventory level (CBM)
         inventory_over_time['Opening Inventory level (CBM)'] = (
-                inventory_over_time['Inventory level (CBM)'] - inventory_over_time['Inflow (CBM)'] + inventory_over_time[
-            'Outflow (CBM)']
+                inventory_over_time['Inventory level (CBM)'] - inventory_over_time['Inflow (CBM)'] +
+                inventory_over_time[
+                    'Outflow (CBM)']
         )
 
         # Step:
@@ -2935,6 +3005,7 @@ def filtering_historic_insaldo(inventory_over_time, start_date, end_date):
     selected_month_data.to_csv(output_path, index=True)
 
     return selected_month_data
+
 
 def kpi_calculation(inventory_over_time, inventory_ot_by_month, start_date, end_date):
     with Progress() as progress:
@@ -3073,6 +3144,7 @@ def kpi_calculation(inventory_over_time, inventory_ot_by_month, start_date, end_
     # Print KPIs for the selected months
     print("\nKPIs for the selected months:\n", monthly_data)
     print("KPI calculation complete.\n")
+
 
 def main():
     # Input date range
@@ -3253,34 +3325,51 @@ def main():
     ]):
         print(f"{name} (After Screening):\n", df.head(), "\n")
 
+
+    resumen_mensual_ingresos_clientes, resumen_mensual_ingresos_sd, resumen_mensual_ingresos_fact = (
+        monthly_receptions_summary(registro_ingresos, supplier_info,
+                                   inventario_sin_filtro, rpsdt_productos))
+
+    # Handle unknown 'bodega' values after merging (ensures idcontacto_x is available)
+    for df_name, df in zip(
+            ['saldo_inventory', 'registro_ingresos', 'registro_salidas'],
+            [saldo_inventory, registro_ingresos, registro_salidas]
+    ):
+        print(f"Processing 'handle_unknown_bodega' for {df_name}")
+        df, eligible_rows, replaced_rows, remaining_rows = handle_unknown_bodega(df)
+
+
     # If warehouse analysis, filter DataFrames after data_screening
     if analysis_type == 'W' and entity_id is not None:
         # List of DataFrames to filter by warehouse
         dataframes_to_filter = [wl_ingresos, rpshd_despachos, rpsdt_productos,
-                                registro_ingresos, registro_salidas, inmovih_table, saldo_inventory
-                                ]
+                                registro_ingresos, registro_salidas, inmovih_table, saldo_inventory,
+                                resumen_mensual_ingresos_sd, resumen_mensual_ingresos_fact]
+
+        """These two dataframes does not have 'bodega' column. [wl_ingresos, rpshd_despachos]"""
 
         # Filter DataFrames based on the selected warehouse
         filtered_dataframes = filter_dataframes_by_warehouse(dataframes_to_filter, entity_id)
+
+
 
         # Debugging: Print filtered data by warehouse
         print("\nFiltered Data by Warehouse:\n")
         for name, df in zip([
             'wl_ingresos', 'rpshd_despachos', 'rpsdt_productos',
             'registro_ingresos', 'registro_salidas', 'inmovih_table',
-            'saldo_inventory'
+            'saldo_inventory', 'resumen_mensual_ingresos_sd', 'resumen_mensual_ingresos_fact'
         ], filtered_dataframes):
             print(f"{name} (Filtered by Warehouse):\n", df.head(), "\n")
 
         # Unpack filtered DataFrames
         (wl_ingresos, rpshd_despachos, rpsdt_productos,
-         registro_ingresos, registro_salidas, inmovih_table, saldo_inventory) = filtered_dataframes
+         registro_ingresos, registro_salidas, inmovih_table, saldo_inventory, resumen_mensual_ingresos_sd,
+         resumen_mensual_ingresos_fact) = filtered_dataframes
 
     print("\nMain: Generating all reception data by warehouse and client...\n")
 
-    resumen_mensual_ingresos_clientes, resumen_mensual_ingresos_sd, resumen_mensual_ingresos_fact = (
-        monthly_receptions_summary(registro_ingresos, supplier_info,
-                                   inventario_sin_filtro, rpsdt_productos))
+
 
     # Debugging: Print monthly reception summaries
     print("\nMonthly Receptions Summary:\n")
