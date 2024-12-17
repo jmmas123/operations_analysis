@@ -969,8 +969,7 @@ def data_screening(saldo_inventory, registro_ingresos, registro_salidas, rpsdt_p
                 return row['bodega']
 
         # Apply the logic to update `bodega` for all relevant DataFrames
-        for df in [saldo_inventory, registro_ingresos, registro_salidas, rpsdt_productos,
-                   inmovih_table, registro_salidas]:
+        for df in [saldo_inventory, registro_ingresos, registro_salidas, rpsdt_productos]:
             df['bodega'] = df.apply(update_bodega_based_on_idcontacto, axis=1)
 
         # Step: Cleaning data
@@ -2064,8 +2063,13 @@ def billing_data_reconstruction(saldo_inv_cliente_fact, resumen_mensual_ingresos
         outflow_with_mode['mode_count'].fillna(1, inplace=True)
 
         # Load the 'Unique Modes per Product - KC' data
+        # unique_modes_file_path = \
+        #     r'\\192.168.10.18\gem\006 MORIBUS\ANALISIS y PROYECTOS\assets\inventory_analysis_client\pallet_mode_KC.xlsx'
+        # unique_modes_df = pd.read_excel(unique_modes_file_path)
+
         unique_modes_file_path = \
-            r'\\192.168.10.18\gem\006 MORIBUS\ANALISIS y PROYECTOS\assets\inventory_analysis_client\pallet_mode_KC.xlsx'
+            (r'/Users/j.m./Library/Mobile Documents/com~apple~CloudDocs/GM/MOBU -'
+             r' OPL/assets/inventory_analysis_client/pallet_mode_KC.xlsx')
         unique_modes_df = pd.read_excel(unique_modes_file_path)
 
         # Step:
