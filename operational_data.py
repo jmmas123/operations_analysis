@@ -210,8 +210,8 @@ def get_base_path():
 
 def get_base_output_path():
     if os.name == 'nt':  # Windows
-        obase_path = r'C:\Users\melanie\Downloads'
-        # obase_path = r'C:\Users\josemaria\Downloads'
+        # obase_path = r'C:\Users\melanie\Downloads'
+        obase_path = r'C:\Users\josemaria\Downloads'
 
     else:  # MacOS (or others)
         obase_path = r'/Users/j.m./Downloads'
