@@ -1509,6 +1509,8 @@ def group_by_month_bodega(resumen_mensual_ingresos_clientes, resumen_mensual_des
 
 
 def capacity_measured_in_cubic_meters(saldo_inventory, supplier_info):
+
+
     with Progress() as progress:
         # Add a new task
         task = progress.add_task("[green]Analyzing Client Inventory: ", total=10)
@@ -1631,6 +1633,10 @@ def capacity_measured_in_cubic_meters(saldo_inventory, supplier_info):
 
 def billing_data_reconstruction(saldo_inv_cliente_fact, resumen_mensual_ingresos_fact, resumen_despachos_cliente_fact,
                                 start_date, end_date, registro_ingresos, supplier_info):
+
+    output_path = os.path.join(get_base_output_path(), 'saldo_inv_cliente_fact_filtered.csv')
+    saldo_inv_cliente_fact.to_csv(output_path, index=True)
+
     with Progress() as progress:
         # Add a new task
         task = progress.add_task("[green]Processing and analyzing Client's operational Data: ", total=44)
@@ -3413,6 +3419,10 @@ def main():
         (wl_ingresos, rpshd_despachos, rpsdt_productos,
          registro_ingresos, registro_salidas, inmovih_table, saldo_inventory, resumen_mensual_ingresos_sd,
          resumen_mensual_ingresos_fact,resumen_mensual_ingresos_clientes) = filtered_dataframes
+
+        # Write the cleaned outflow data to CSV
+        output_path = os.path.join(get_base_output_path(), 'saldo_inventory_filtered.csv')
+        saldo_inventory.to_csv(output_path, index=False)
 
     print("\nMain: Generating all reception data by warehouse and client...\n")
 
