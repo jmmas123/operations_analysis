@@ -202,7 +202,7 @@ def handle_unknown_bodega(merged_ingresos_inventario):
 # Determinar el área de análisis
 def get_base_path():
     if os.name == 'nt':  # Windows
-        return r'\\192.168.10.18\gem\006 MORIBUS\ANALISIS y PROYECTOS\tbls22_06_24\\'
+        return r'C:\tablas\\'
     else:  # MacOS (or others)
         return '/Users/j.m./Library/Mobile Documents/com~apple~CloudDocs/GM/MOBU - OPL/tbls22_06_24/'
 
@@ -2251,7 +2251,7 @@ def billing_data_reconstruction(saldo_inv_cliente_fact, resumen_mensual_ingresos
             'pesokgs': 'sum',
             'calculated_pallets': 'first',
             'bodega': 'first',
-            'idcontacto':'first',
+            'idcontacto': 'first',
             'Client': 'first'
         }).reset_index()
 
@@ -2285,7 +2285,7 @@ def billing_data_reconstruction(saldo_inv_cliente_fact, resumen_mensual_ingresos
             'bodega': 'Warehouse'
         }, inplace=True)
 
-        print("outflow_grouped: look here", outflow_grouped.head())
+        print("outflow_grouped:\n", outflow_grouped.head())
 
 
         outflow_grouped = outflow_grouped.loc[:,
@@ -2678,8 +2678,22 @@ def inventory_oldest_products(saldo_inventory, supplier_info):
         progress.update(task, advance=1)
 
     print("\nActual Client inventory oldest products:\n", saldo_inventory_grouped)
-    print("Days on hand analysis complete.\n")
+    print("Days on hand analysis complete.\n")\
 
+
+def clip_near_zero(df, columns=None, epsilon=1e-6):
+    """
+    For each column in `columns`, set the value to 0 if abs(value) < epsilon.
+    If columns is None, applies to all float columns in df.
+    """
+    if columns is None:
+        # Identify float columns automatically
+        columns = df.select_dtypes(include=[np.number]).columns
+
+    for col in columns:
+        df[col] = df[col].apply(lambda x: 0 if abs(x) < epsilon else x)
+
+    return df
 
 def reconstruct_inventory_over_time(
         inflow_with_mode_historical,
@@ -2690,7 +2704,7 @@ def reconstruct_inventory_over_time(
 ):
     with Progress() as progress:
         # Add a new task
-        task = progress.add_task("[green]Reconstructing inventory behavior Data: ", total=20)
+        task = progress.add_task("[green]Reconstructing inventory behavior Data: ", total=18)
 
         # Ensure 'idingreso' and 'itemno' are strings
         inflow_with_mode_historical['idingreso'] = inflow_with_mode_historical['idingreso'].astype(str)
@@ -2708,21 +2722,28 @@ def reconstruct_inventory_over_time(
         time.sleep(1)  # Simulate a task
         progress.update(task, advance=1)
 
-        # Do the same for outflow_with_mode_historical if 'idingreso' and 'itemno_x' exist
-        if 'idingreso' in outflow_with_mode_historical.columns and 'itemno' in outflow_with_mode_historical.columns:
-            outflow_with_mode_historical['idingreso'] = outflow_with_mode_historical['idingreso'].astype(str)
+        print("Outlflow with mode historicall:\n", outflow_with_mode_historical)
+
+        # Ensure 'idingreso' is a string
+        outflow_with_mode_historical['idingreso'] = outflow_with_mode_historical['idingreso'].astype(str)
+
+        # Check for the presence of 'itemno' or 'itemno_x' and handle accordingly
+        if 'itemno' in outflow_with_mode_historical.columns:
             outflow_with_mode_historical['itemno'] = outflow_with_mode_historical['itemno'].astype(str)
-            outflow_with_mode_historical['dup_key'] = outflow_with_mode_historical['idingreso'] + \
-                                                      outflow_with_mode_historical[
-                                                          'itemno']
-        else:
-            # If the columns are named differently, adjust accordingly
-            # For example, if they are 'idingreso_x' and 'itemno_x':
-            outflow_with_mode_historical['idingreso'] = outflow_with_mode_historical['idingreso'].astype(str)
+            outflow_with_mode_historical['dup_key'] = (
+                    outflow_with_mode_historical['idingreso'] + outflow_with_mode_historical['itemno']
+            )
+        elif 'itemno_x' in outflow_with_mode_historical.columns:
             outflow_with_mode_historical['itemno_x'] = outflow_with_mode_historical['itemno_x'].astype(str)
-            outflow_with_mode_historical['dup_key'] = outflow_with_mode_historical['idingreso'] + \
-                                                      outflow_with_mode_historical[
-                                                          'itemno_x']
+            outflow_with_mode_historical['dup_key'] = (
+                    outflow_with_mode_historical['idingreso'] + outflow_with_mode_historical['itemno_x']
+            )
+        else:
+            # If neither 'itemno' nor 'itemno_x' is present, create a placeholder for 'dup_key'
+            outflow_with_mode_historical['dup_key'] = outflow_with_mode_historical['idingreso']
+
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
         # Ensure date columns are in datetime format and normalize to remove time component
         inflow_with_mode_historical['fecha_x'] = pd.to_datetime(
@@ -2763,36 +2784,25 @@ def reconstruct_inventory_over_time(
 
         # Step 3: Prepare date range
         date_range = pd.date_range(start=start_date, end=end_date, freq='D')
-        date_df = pd.DataFrame({'date': date_range})
 
-        if 'idingreso' in inflow_with_mode_historical.index.names:
-            inflow_with_mode_historical.reset_index(drop=True, inplace=True)
+        # Filter dates to include only those with transactions
+        valid_dates = pd.concat([
+            inflow_with_mode_historical[['fecha_x']],
+            outflow_with_mode_historical[['fecha_x']]
+        ]).drop_duplicates().rename(columns={'fecha_x': 'date'})
+
+        date_df = pd.DataFrame({'date': date_range}).merge(valid_dates, on='date', how='inner')
 
         # Step:
         time.sleep(1)  # Simulate a task
         progress.update(task, advance=1)
 
         # Aggregate daily inflows
-        daily_inflows = inflow_with_mode_historical.groupby(['fecha_x', 'idcontacto', 'idingreso', 'idmodelo']).agg({
-            'inicial': 'sum',
-            'pesokgs': 'sum',
-            'pallets_final': 'first'  # no. de palets
-        }).reset_index()
-
-        # Step:
-        time.sleep(1)  # Simulate a task
-        progress.update(task, advance=1)
-
-        daily_inflows = daily_inflows.groupby(['fecha_x', 'idcontacto', ]).agg({
+        daily_inflows = inflow_with_mode_historical.groupby(['fecha_x', 'idcontacto']).agg({
             'inicial': 'sum',
             'pesokgs': 'sum',
             'pallets_final': 'sum'  # no. de palets
-
         }).reset_index()
-
-        # Step:
-        time.sleep(1)  # Simulate a task
-        progress.update(task, advance=1)
 
         daily_inflows.rename(columns={
             'fecha_x': 'date',
@@ -2801,40 +2811,28 @@ def reconstruct_inventory_over_time(
             'pallets_final': 'Pallets inflow'
         }, inplace=True)
 
-        # Aggregate daily outflows
-        daily_outflows = outflow_with_mode_historical.groupby(['fecha_x', 'idcontacto', 'trannum', 'idmodelo_x']).agg(
-            {
-                'cantidad': 'sum',
-                'pesokgs': 'sum',
-                'calculated_pallets': 'first'
-            }).reset_index()
-
         # Step:
         time.sleep(1)  # Simulate a task
         progress.update(task, advance=1)
 
-        daily_outflows = daily_outflows.groupby(['fecha_x', 'idcontacto']).agg({
+        # Aggregate daily outflows
+        daily_outflows = outflow_with_mode_historical.groupby(['fecha_x', 'idcontacto']).agg({
             'cantidad': 'sum',
             'pesokgs': 'sum',
             'calculated_pallets': 'sum'
         }).reset_index()
 
-        # Step:
-        time.sleep(1)  # Simulate a task
-        progress.update(task, advance=1)
-
         daily_outflows.rename(columns={
             'fecha_x': 'date',
             'cantidad': 'Outflow (CBM)',
-            # 'idcontacto_x': 'idcontacto',
             'pesokgs': 'Units outflow',
             'calculated_pallets': 'Pallets outflow'
         }, inplace=True)
 
         # Prepare clients list
         clients = pd.concat([
-            daily_inflows[['idcontacto']],
-            daily_outflows[['idcontacto']]
+            daily_inflows[['idcontacto']].drop_duplicates(),
+            daily_outflows[['idcontacto']].drop_duplicates()
         ]).drop_duplicates()
 
         # Step:
@@ -2844,22 +2842,12 @@ def reconstruct_inventory_over_time(
         # Cross join clients with date range
         inventory_over_time = clients.merge(date_df, how='cross')
 
-        # Step:
-        time.sleep(1)  # Simulate a task
-        progress.update(task, advance=1)
-
         # Merge inflows and outflows
         inventory_over_time = inventory_over_time.merge(
             daily_inflows,
             on=['date', 'idcontacto'],
             how='left'
-        )
-
-        # Step:
-        time.sleep(1)  # Simulate a task
-        progress.update(task, advance=1)
-
-        inventory_over_time = inventory_over_time.merge(
+        ).merge(
             daily_outflows,
             on=['date', 'idcontacto'],
             how='left'
@@ -2892,10 +2880,6 @@ def reconstruct_inventory_over_time(
                 'initial_inventory': 0.0
             })
 
-        # Step:
-        time.sleep(1)  # Simulate a task
-        progress.update(task, advance=1)
-
         # Merge initial inventory
         inventory_over_time = inventory_over_time.merge(
             initial_inventory,
@@ -2907,79 +2891,61 @@ def reconstruct_inventory_over_time(
         time.sleep(1)  # Simulate a task
         progress.update(task, advance=1)
 
-        # Calculate cumulative inventory levels with adjustments to prevent negative inventory
-        for idcontacto, group in inventory_over_time.groupby('idcontacto'):
-            initial_inv = group['initial_inventory'].iloc[0]
-            # Initialize Units and Pallets with initial inventory if available
-            initial_units = 0.0  # Adjust if you have initial units per client
-            initial_pallets = 0.0  # Adjust if you have initial pallets per client
+        df_client_share = (
+            inventory_over_time
+            .groupby('idcontacto', as_index=False)
+            .agg({'Inflow (CBM)': 'sum', 'Outflow (CBM)': 'sum'})
+        )
 
-            inventory_levels = []
-            units_levels = []
-            pallets_levels = []
-            current_inventory = initial_inv
-            current_units = initial_units
-            current_pallets = initial_pallets
+        # Compute percentages
+        total_inflow = df_client_share['Inflow (CBM)'].sum()
+        df_client_share['Inflow %'] = df_client_share['Inflow (CBM)'] / total_inflow * 100
 
-            for idx, row in group.iterrows():
-                inflow = row['Inflow (CBM)']
-                outflow = row['Outflow (CBM)']
-                units_inflow = row['Units inflow']
-                units_outflow = row['Units outflow']
-                pallets_inflow = row['Pallets inflow']
-                pallets_outflow = row['Pallets outflow']
+        inventory_ot_by_month = inventory_over_time
 
-                # Calculate potential new inventory levels
-                potential_inventory = current_inventory + inflow - outflow
+        # 1. Group by date only, summing relevant numeric columns you care about:
+        daily_agg = (
+            inventory_over_time
+            .groupby('date', as_index=False)
+            .agg({
+                'Inflow (CBM)': 'sum',
+                'Outflow (CBM)': 'sum',
+                # If you also track 'Units inflow', 'Units outflow', etc., include them here:
+                'Units inflow': 'sum',
+                'Pallets inflow': 'sum',
+                'Units outflow': 'sum',
+                'Pallets outflow': 'sum',
+                # If you want to incorporate any initial_inventory from each row:
+                'initial_inventory': 'sum'
+            })
+            .sort_values('date')  # Ensure ascending chronological order
+        )
 
-                if potential_inventory < 0:
-                    # Adjust outflow to prevent negative inventory
-                    adjusted_outflow = current_inventory + inflow
-                    # Calculate adjustment factor to proportionally adjust units and pallets
-                    if outflow != 0:
-                        adjustment_factor = adjusted_outflow / outflow
-                    else:
-                        adjustment_factor = 0.0
-                    # Adjust units_outflow and pallets_outflow proportionally
-                    adjusted_units_outflow = units_outflow * adjustment_factor
-                    adjusted_pallets_outflow = pallets_outflow * adjustment_factor
+        # 2. Create an 'Inventory level (CBM)' column (start it at 0 or the sum of initial_inventory on the first day).
+        daily_agg['Inventory level (CBM)'] = 0.0
 
-                    # Update current inventory, units, and pallets
-                    current_inventory = 0.0
-                    current_units += units_inflow - adjusted_units_outflow
-                    current_pallets += pallets_inflow - adjusted_pallets_outflow
-                else:
-                    # No adjustment needed
-                    adjusted_units_outflow = units_outflow
-                    adjusted_pallets_outflow = pallets_outflow
+        # If you have a reason to set the very first day's starting point from the sum of 'initial_inventory', do:
+        if not daily_agg.empty:
+            current_inventory = daily_agg.loc[daily_agg.index[0], 'initial_inventory']
+        else:
+            current_inventory = 0.0
 
-                    current_inventory = potential_inventory
-                    current_units += units_inflow - adjusted_units_outflow
-                    current_pallets += pallets_inflow - adjusted_pallets_outflow
+        # 3. Calculate the daily running total, preventing negative values.
+        inventory_levels = []
+        for idx, row in daily_agg.iterrows():
+            inflow = row['Inflow (CBM)']
+            outflow = row['Outflow (CBM)']
 
-                # Ensure units and pallets are non-negative
-                current_units = max(current_units, 0.0)
-                current_pallets = max(current_pallets, 0.0)
+            new_inventory = current_inventory + inflow - outflow
+            if new_inventory < 0:
+                new_inventory = 0
+            inventory_levels.append(new_inventory)
 
-                # Set units and pallets to zero when inventory level is zero
-                if current_inventory == 0.0:
-                    current_units = 0.0
-                    current_pallets = 0.0
+            current_inventory = new_inventory
 
-                inventory_levels.append(current_inventory)
-                units_levels.append(current_units)
-                pallets_levels.append(current_pallets)
+        daily_agg['Inventory level (CBM)'] = inventory_levels
 
-            inventory_over_time.loc[group.index, 'Inventory level (CBM)'] = inventory_levels
-            inventory_over_time.loc[group.index, 'Units'] = units_levels
-            inventory_over_time.loc[group.index, 'Pallets'] = pallets_levels
-
-        # Step:
-        time.sleep(1)  # Simulate a task
-        progress.update(task, advance=1)
-
-        # Drop the 'initial_inventory' column if not needed
-        inventory_over_time.drop(columns=['initial_inventory', 'idcontacto'], inplace=True)
+        inventory_over_time = daily_agg.copy()
 
         # Step:
         time.sleep(1)  # Simulate a task
@@ -2988,16 +2954,15 @@ def reconstruct_inventory_over_time(
         # Compute Opening Inventory level (CBM)
         inventory_over_time['Opening Inventory level (CBM)'] = (
                 inventory_over_time['Inventory level (CBM)'] - inventory_over_time['Inflow (CBM)'] +
-                inventory_over_time[
-                    'Outflow (CBM)']
+                inventory_over_time['Outflow (CBM)']
         )
 
-        # Step:
         time.sleep(1)  # Simulate a task
         progress.update(task, advance=1)
 
         # Group by month and calculate initial and final inventory levels
-        inventory_ot_by_month = inventory_over_time.groupby(pd.Grouper(key='date')).agg({
+        inventory_ot_by_month = inventory_ot_by_month.groupby(pd.Grouper(key='date', freq='M')).agg({
+            'idcontacto': 'first',
             'Inflow (CBM)': 'sum',
             'Units inflow': 'sum',
             'Pallets inflow': 'sum',
@@ -3008,7 +2973,6 @@ def reconstruct_inventory_over_time(
             'Inventory level (CBM)': 'last',  # Final inventory
         }).reset_index()
 
-        # Step:
         time.sleep(1)  # Simulate a task
         progress.update(task, advance=1)
 
@@ -3018,15 +2982,40 @@ def reconstruct_inventory_over_time(
             'Inventory level (CBM)': 'Final Inventory level (CBM)'
         }, inplace=True)
 
-        # # Normalize 'start_date' and 'end_date'
-        # start_date = pd.to_datetime(start_date).normalize()
-        # end_date = pd.to_datetime(end_date).normalize()
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
-        # # Apply filtering
-        # inventory_over_time_filtered = inventory_over_time[
-        #     (inventory_over_time['date'] >= start_date) &
-        #     (inventory_over_time['date'] <= end_date)
-        #     ]
+        print("Clients contained in analysis:\n", df_client_share.sort_values('Inflow (CBM)', ascending=False))
+
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
+
+        inventory_over_time = (
+            inventory_over_time
+            .groupby(['date'], as_index=False)
+            .agg({
+                'Inflow (CBM)': 'sum',
+                'Units inflow': 'sum',
+                'Pallets inflow': 'sum',
+                'Outflow (CBM)': 'sum',
+                'Units outflow': 'sum',
+                'Pallets outflow': 'sum',
+                # For inventory level, let's keep the last recorded value that day
+                'Inventory level (CBM)': 'last',
+                # If 'initial_inventory' is relevant, you can do 'first'
+                'initial_inventory': 'first',
+            })
+        )
+
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
+
+        inventory_ot_by_month.rename(columns={
+            'initial_inventory': 'Initial Inventory level (CBM)',
+        }, inplace=True)
+
+        # Step 2: Clip near-zero values
+        inventory_over_time = clip_near_zero(inventory_over_time)
 
         # Save to CSV
         output_path = os.path.join(get_base_output_path(), 'insaldo_historic_dataframe_behavior_by_month.csv')
@@ -3038,7 +3027,6 @@ def reconstruct_inventory_over_time(
         time.sleep(1)  # Simulate a task
         progress.update(task, advance=1)
 
-    # print('Inventory behavior for selected month:\n', inventory_over_time)
     print("Inventory behavior reconstruction complete.\n")
 
     return inventory_over_time, inventory_ot_by_month
@@ -3053,7 +3041,7 @@ def filtering_historic_insaldo(inventory_over_time, start_date, end_date):
         (inventory_over_time['date'] >= start_date) & (inventory_over_time['date'] <= end_date)
         ]
 
-    selected_month_data = selected_data.drop(columns=['Opening Inventory level (CBM)'])
+    selected_month_data = selected_data.drop(columns=['initial_inventory'])
 
     # Display the filtered dataframe
     print("\nInventory behavior for selected date range:\n", selected_month_data)
@@ -3205,8 +3193,11 @@ def kpi_calculation(inventory_over_time, inventory_ot_by_month, start_date, end_
 
 def main():
     # Input date range
-    start_date_str = input("Enter the start date of analysis (dd/mm/yy or dd-mm-yy): ")
-    end_date_str = input("Enter the end date of analysis (dd/mm/yy or dd-mm-yy): ")
+    # start_date_str = input("Enter the start date of analysis (dd/mm/yy or dd-mm-yy): ")
+    # end_date_str = input("Enter the end date of analysis (dd/mm/yy or dd-mm-yy): ")
+
+    start_date_str = '01/11/24'
+    end_date_str = '30/11/24'
 
     # Convert to datetime with error handling
     try:
