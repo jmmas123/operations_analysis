@@ -2969,7 +2969,7 @@ def reconstruct_inventory_over_time(
             'Outflow (CBM)': 'sum',
             'Units outflow': 'sum',
             'Pallets outflow': 'sum',
-            'Opening Inventory level (CBM)': 'first',  # Initial inventory
+            # 'Opening Inventory level (CBM)': 'first',  # Initial inventory
             'Inventory level (CBM)': 'last',  # Final inventory
         }).reset_index()
 
@@ -2978,7 +2978,7 @@ def reconstruct_inventory_over_time(
 
         # Rename the columns
         inventory_ot_by_month.rename(columns={
-            'Opening Inventory level (CBM)': 'Initial Inventory level (CBM)',
+            # 'Opening Inventory level (CBM)': 'Initial Inventory level (CBM)',
             'Inventory level (CBM)': 'Final Inventory level (CBM)'
         }, inplace=True)
 
