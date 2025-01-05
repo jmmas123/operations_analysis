@@ -130,8 +130,6 @@ def handle_unknown_bodega(merged_ingresos_inventario):
     """
     base_output_path = get_base_output_path()
 
-    print("Columns in the DataFrame:", merged_ingresos_inventario.columns)
-
     # Create a filtered DataFrame excluding 'DESCONOCIDO'
     filtered_bodegas = merged_ingresos_inventario[merged_ingresos_inventario['bodega'] != 'DESCONOCIDO']
 
@@ -1279,14 +1277,14 @@ def monthly_receptions_summary(registro_ingresos, supplier_info, inventario_sin_
         time.sleep(1)  # Simulate a task
         progress.update(task, advance=1)
 
-        # Step: Printing CSV data
-        time.sleep(1)  # Simulate a task
-        progress.update(task, advance=1)
-
         output_path = os.path.join(get_base_output_path(), 'resumen_mensual_ingresos_fact.csv')
         resumen_mensual_ingresos_fact.to_csv(output_path, index=True)
         output_path = os.path.join(get_base_output_path(), 'resumen_mensual_ingresos_sd.csv')
         resumen_mensual_ingresos_sd.to_csv(output_path, index=True)
+
+        # Step: Printing CSV data
+        time.sleep(1)  # Simulate a task
+        progress.update(task, advance=1)
 
     print("Historic inflow of CBM, pallets and units by client and warehouse:\n", resumen_mensual_ingresos_clientes)
     print("Monthly reception data processed correctly.\n")
@@ -1605,9 +1603,9 @@ def capacity_measured_in_cubic_meters(saldo_inventory, supplier_info):
         time.sleep(1)  # Simulate a task
         progress.update(task, advance=1)
 
-        saldo_inventory_summed_bodega = saldo_inventory_summed_bodega.drop(columns=[
-            'idcontacto',
-        ])
+        # saldo_inventory_summed_bodega = saldo_inventory_summed_bodega.drop(columns=[
+        #     'idcontacto',
+        # ])
 
         # Step:
         time.sleep(1)  # Simulate a task
@@ -1616,6 +1614,7 @@ def capacity_measured_in_cubic_meters(saldo_inventory, supplier_info):
         # Rename the columns
         saldo_inventory_summed_bodega.rename(columns={
             'bodega': 'Bodega',
+            'idcontacto': 'Cliente',
             'pesokgs': 'Unidades',
             'inicial': 'CBM',
             'idmodelo': 'Pallets',
@@ -2038,15 +2037,15 @@ def billing_data_reconstruction(saldo_inv_cliente_fact, resumen_mensual_ingresos
         # Step 6: Fill missing 'mode_count' with a default value (e.g., 1 if no grouping is available)
         outflow_with_mode['mode_count'].fillna(1, inplace=True)
 
-        # Load the 'Unique Modes per Product - KC' data
-        unique_modes_file_path = \
-            r'\\192.168.10.18\gem\006 MORIBUS\ANALISIS y PROYECTOS\assets\inventory_analysis_client\pallet_mode_KC.xlsx'
-        unique_modes_df = pd.read_excel(unique_modes_file_path)
-
+        # # Load the 'Unique Modes per Product - KC' data
         # unique_modes_file_path = \
-        #     (r'/Users/j.m./Library/Mobile Documents/com~apple~CloudDocs/GM/MOBU -'
-        #      r' OPL/assets/inventory_analysis_client/pallet_mode_KC.xlsx')
+        #     r'\\192.168.10.18\gem\006 MORIBUS\ANALISIS y PROYECTOS\assets\inventory_analysis_client\pallet_mode_KC.xlsx'
         # unique_modes_df = pd.read_excel(unique_modes_file_path)
+
+        unique_modes_file_path = \
+            (r'/Users/j.m./Library/Mobile Documents/com~apple~CloudDocs/GM/MOBU -'
+             r' OPL/assets/inventory_analysis_client/pallet_mode_KC.xlsx')
+        unique_modes_df = pd.read_excel(unique_modes_file_path)
 
         # Step:
         time.sleep(1)  # Simulate a task
@@ -3373,6 +3372,8 @@ def main():
     ]):
         print(f"{name} (After Screening):\n", df.head(), "\n")
 
+    print("\nMain: Generating all reception data by warehouse and client...\n")
+
     resumen_mensual_ingresos_clientes, resumen_mensual_ingresos_sd, resumen_mensual_ingresos_fact = (
         monthly_receptions_summary(registro_ingresos, supplier_info,
                                    inventario_sin_filtro, rpsdt_productos))
@@ -3382,7 +3383,6 @@ def main():
             ['saldo_inventory', 'registro_ingresos', 'registro_salidas'],
             [saldo_inventory, registro_ingresos, registro_salidas]
     ):
-        print(f"Processing 'handle_unknown_bodega' for {df_name}")
         df, eligible_rows, replaced_rows, remaining_rows = handle_unknown_bodega(df)
 
     # If warehouse analysis, filter DataFrames after data_screening
@@ -3390,7 +3390,8 @@ def main():
         # List of DataFrames to filter by warehouse
         dataframes_to_filter = [wl_ingresos, rpshd_despachos, rpsdt_productos,
                                 registro_ingresos, registro_salidas, inmovih_table, saldo_inventory,
-                                resumen_mensual_ingresos_sd, resumen_mensual_ingresos_fact, resumen_mensual_ingresos_clientes]
+                                resumen_mensual_ingresos_sd, resumen_mensual_ingresos_fact,
+                                resumen_mensual_ingresos_clientes]
 
         """These two dataframes does not have 'bodega' column. [wl_ingresos, rpshd_despachos]"""
 
@@ -3411,28 +3412,26 @@ def main():
          registro_ingresos, registro_salidas, inmovih_table, saldo_inventory, resumen_mensual_ingresos_sd,
          resumen_mensual_ingresos_fact,resumen_mensual_ingresos_clientes) = filtered_dataframes
 
-        # Write the cleaned outflow data to CSV
+        # Write the cleaned inventory df
         output_path = os.path.join(get_base_output_path(), 'saldo_inventory_filtered.csv')
         saldo_inventory.to_csv(output_path, index=False)
 
-    print("\nMain: Generating all reception data by warehouse and client...\n")
-
-    # Debugging: Print monthly reception summaries
-    print("\nMonthly Receptions Summary:\n")
-    print("resumen_mensual_ingresos_clientes:\n", resumen_mensual_ingresos_clientes.head(), "\n")
-    print("resumen_mensual_ingresos_sd:\n", resumen_mensual_ingresos_sd.head(), "\n")
-    print("resumen_mensual_ingresos_fact:\n", resumen_mensual_ingresos_fact.head(), "\n")
+    # # Debugging: Print monthly reception summaries
+    # print("\nMonthly Receptions Summaries:\n")
+    # print("resumen_mensual_ingresos_clientes:\n", resumen_mensual_ingresos_clientes.head(), "\n")
+    # print("resumen_mensual_ingresos_sd:\n", resumen_mensual_ingresos_sd.head(), "\n")
+    # print("resumen_mensual_ingresos_fact:\n", resumen_mensual_ingresos_fact.head(), "\n")
 
     print("\nMain: Generating all dispatch data by warehouse and client...\n")
 
     resumen_mensual_despachos_clientes_grouped, merged_despachos_inventario, resumen_despachos_cliente_fact = (
         monthly_dispatch_summary(registro_salidas, dispatched_inventory, supplier_info))
 
-    # Debugging: Print monthly dispatch summaries
-    print("\nMonthly Dispatch Summary:\n")
-    print("resumen_mensual_despachos_clientes_grouped:\n", resumen_mensual_despachos_clientes_grouped.head(), "\n")
-    print("merged_despachos_inventario:\n", merged_despachos_inventario.head(), "\n")
-    print("resumen_despachos_cliente_fact:\n", resumen_despachos_cliente_fact.head(), "\n")
+    # # Debugging: Print monthly dispatch summaries
+    # print("\nMonthly Dispatch Summary:\n")
+    # print("resumen_mensual_despachos_clientes_grouped:\n", resumen_mensual_despachos_clientes_grouped.head(), "\n")
+    # print("merged_despachos_inventario:\n", merged_despachos_inventario.head(), "\n")
+    # print("resumen_despachos_cliente_fact:\n", resumen_despachos_cliente_fact.head(), "\n")
 
     if not resumen_mensual_ingresos_clientes.empty and not resumen_mensual_despachos_clientes_grouped.empty:
         resumen_mensual_ingresos_bodega, resumen_mensual_despachos_bodega = group_by_month_bodega(
@@ -3457,7 +3456,8 @@ def main():
     if not saldo_inv_cliente_fact.empty:
         inflow_with_mode_historical, outflow_with_mode_historical, final_df = (
             billing_data_reconstruction(saldo_inv_cliente_fact, resumen_mensual_ingresos_fact,
-                                        resumen_despachos_cliente_fact, start_date, end_date, registro_ingresos, supplier_info))
+                                        resumen_despachos_cliente_fact, start_date, end_date, registro_ingresos,
+                                        supplier_info))
     else:
         print("\nCannot proceed with inventory status calculations - Client currently has no "
               "product on any warehouse.\n")
