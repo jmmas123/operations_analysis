@@ -1,5 +1,6 @@
 import os
 import random
+import socket
 import warnings
 from datetime import datetime
 import pandas as pd
@@ -196,25 +197,42 @@ def handle_unknown_bodega(merged_ingresos_inventario):
 
     return merged_ingresos_inventario, eligible_rows, replaced_rows, remaining_rows
 
+def get_clean_hostname():
+    hostname = socket.gethostname()
+    # Remove .local if it exists
+    if hostname.endswith('.local'):
+        hostname = hostname.replace('.local', '')
+    return hostname
 
-# Determinar el área de análisis
 def get_base_path():
+    print(f"Operating system: {os.name}")
     if os.name == 'nt':  # Windows
-        return r'C:\tablas\\'
-    else:  # MacOS (or others)
-        return '/Users/j.m./Library/Mobile Documents/com~apple~CloudDocs/GM/MOBU - OPL/tbls22_06_24/'
-
+        print("Returning Windows path")
+        return r'C:\Users\josemaria\Downloads'
+    else:  # macOS or others
+        hostname = socket.gethostname()
+        print(f"Hostname: {hostname}")
+        if hostname == 'MacBook-Pro.local':  # Replace with your MacBook Pro's hostname
+            print("Returning MacBook Pro path")
+            return '/Users/j.m./Library/Mobile Documents/com~apple~CloudDocs/GM/MOBU - OPL/tbls22_06_24/'
+        elif hostname == 'Josemarias-Mac-Studio.local':  # Replace with your Mac Studio's hostname
+            print("Returning Mac Studio path")
+            return '/Users/jm/Library/Mobile Documents/com~apple~CloudDocs/GM/MOBU - OPL/tbls22_06_24/'
+        else:
+            print(f"Warning: Unknown hostname {hostname}. Returning None")
+            return None  # If no condition is met
 
 def get_base_output_path():
     if os.name == 'nt':  # Windows
-        # obase_path = r'C:\Users\melanie\Downloads'
         obase_path = r'C:\Users\josemaria\Downloads'
-
-    else:  # MacOS (or others)
-        obase_path = r'/Users/j.m./Downloads'
-    return obase_path
-
-
+        return obase_path
+    else:  # macOS (or others)
+        hostname = socket.gethostname()  # Get the hostname of the current machine
+        if hostname == 'MacBook-Pro.local':
+            obase_path = '/Users/j.m./Downloads'
+        elif hostname == 'Josemarias-Mac-Studio.local':
+            obase_path =  '/Users/jm/Downloads'
+            return obase_path
 # Main functions -------------------------------------------------------------------------------------------------------
 
 def load_data():
@@ -998,12 +1016,18 @@ def data_screening(saldo_inventory, registro_ingresos, registro_salidas, rpsdt_p
 
 def insaldo_bode_comp(saldo_inventory):
     # Leer los datos especificando los tipos de datos
-    if os.name == 'nt':
-        inmodelo_clasificacion = pd.read_excel(
-            r'\\192.168.10.18\gem\006 MORIBUS\ANALISIS y PROYECTOS\varios\modelos_clasificacion.xlsx')
-    else:
-        inmodelo_clasificacion = pd.read_excel(
-            r'/Users/j.m./Library/Mobile Documents/com~apple~CloudDocs/GM/MOBU - OPL/varios/modelos_clasificacion.xlsx')
+    if os.name == 'nt':  # Windows
+        # Network path for Windows
+        inmodelo_clasificacion = pd.read_excel('\\192.168.10.18\gem\006 MORIBUS\ANALISIS y PROYECTOS\varios\modelos_clasificacion.xlsx')
+    else:  # macOS or others
+        hostname = socket.gethostname()
+        if 'Josemarias-Mac-Studio.local' in hostname:  # For Mac Studio
+            inmodelo_clasificacion = pd.read_excel(r'/Users/jm/Library/Mobile Documents/com~apple~CloudDocs/GM/MOBU - OPL/varios/modelos_clasificacion.xlsx')
+        elif 'MacBook-Pro.local' in hostname:  # For MacBook Pro
+            inmodelo_clasificacion = pd.read_excel(r'/Users/j.m./Library/Mobile Documents/com~apple~CloudDocs/GM/MOBU - OPL/varios/modelos_clasificacion.xlsx')
+        else:
+            raise ValueError(f"Unknown hostname: {hostname}. Unable to determine file path.")
+
 
     # Step 2: Ensure `idmodelo` columns are of the same type (e.g., string)
     saldo_inventory['idmodelo'] = saldo_inventory['idmodelo'].astype(str)
@@ -1513,12 +1537,20 @@ def capacity_measured_in_cubic_meters(saldo_inventory, supplier_info):
         # Add a new task
         task = progress.add_task("[green]Analyzing Client Inventory: ", total=10)
         # Leer los datos especificando los tipos de datos
-        if os.name == 'nt':
+        if os.name == 'nt':  # Windows
+            # Network path for Windows
             inmodelo_clasificacion = pd.read_excel(
-                r'\\192.168.10.18\gem\006 MORIBUS\ANALISIS y PROYECTOS\varios\modelos_clasificacion.xlsx')
-        else:
-            inmodelo_clasificacion = pd.read_excel(
-                r'/Users/j.m./Library/Mobile Documents/com~apple~CloudDocs/GM/MOBU - OPL/varios/modelos_clasificacion.xlsx')
+                '\\192.168.10.18\gem\006 MORIBUS\ANALISIS y PROYECTOS\varios\modelos_clasificacion.xlsx')
+        else:  # macOS or others
+            hostname = socket.gethostname()
+            if 'Josemarias-Mac-Studio.local' in hostname:  # For Mac Studio
+                inmodelo_clasificacion = pd.read_excel(
+                    r'/Users/jm/Library/Mobile Documents/com~apple~CloudDocs/GM/MOBU - OPL/varios/modelos_clasificacion.xlsx')
+            elif 'MacBook-Pro.local' in hostname:  # For MacBook Pro
+                inmodelo_clasificacion = pd.read_excel(
+                    r'/Users/j.m./Library/Mobile Documents/com~apple~CloudDocs/GM/MOBU - OPL/varios/modelos_clasificacion.xlsx')
+            else:
+                raise ValueError(f"Unknown hostname: {hostname}. Unable to determine file path.")
 
         # Step:
         time.sleep(1)  # Simulate a task
@@ -2037,15 +2069,25 @@ def billing_data_reconstruction(saldo_inv_cliente_fact, resumen_mensual_ingresos
         # Step 6: Fill missing 'mode_count' with a default value (e.g., 1 if no grouping is available)
         outflow_with_mode['mode_count'].fillna(1, inplace=True)
 
-        # # Load the 'Unique Modes per Product - KC' data
-        # unique_modes_file_path = \
-        #     r'\\192.168.10.18\gem\006 MORIBUS\ANALISIS y PROYECTOS\assets\inventory_analysis_client\pallet_mode_KC.xlsx'
-        # unique_modes_df = pd.read_excel(unique_modes_file_path)
+        """
+        Returns the appropriate file path to the 'pallet_mode_KC.xlsx' depending on the operating system.
+        """
+        if os.name == 'nt':  # Windows
+            unique_modes_file_path = None
+            #unique_modes_file_path = r'\\192.168.10.18\gem\006 MORIBUS\ANALISIS y PROYECTOS\assets\'
+            #inventory_analysis_client\pallet_mode_KC.xlsx'
+            #return unique_modes_file_path
 
-        unique_modes_file_path = \
-            (r'/Users/j.m./Library/Mobile Documents/com~apple~CloudDocs/GM/MOBU -'
-             r' OPL/assets/inventory_analysis_client/pallet_mode_KC.xlsx')
-        unique_modes_df = pd.read_excel(unique_modes_file_path)
+        else:  # macOS or others
+            hostname = socket.gethostname()
+            if 'Josemarias-Mac-Studio.local' in hostname:  # For Mac Studio
+                unique_modes_df = pd.read_excel(
+                    r'/Users/jm/Library/Mobile Documents/com~apple~CloudDocs/GM/MOBU - OPL/assets/'
+                    r'inventory_analysis_client/pallet_mode_KC.xlsx')
+            elif 'MacBook-Pro.local' in hostname:  # For MacBook Pro
+                unique_modes_df = pd.read_excel(
+                    r'/Users/j.m./Library/Mobile Documents/com~apple~CloudDocs/GM/MOBU - OPL/assets/'
+                    r'inventory_analysis_client/pallet_mode_KC.xlsx')
 
         # Step:
         time.sleep(1)  # Simulate a task
@@ -2356,13 +2398,20 @@ def inventory_proportions_by_product(saldo_inventory, supplier_info):
         # Add a task with a total number of steps
         task = progress.add_task("[green]Clustering Clients inventory data: ", total=14)
         # Leer los datos especificando los tipos de datos
-        if os.name == 'nt':
+        if os.name == 'nt':  # Windows
+            # Network path for Windows
             inmodelo_clasificacion = pd.read_excel(
-                r'\\192.168.10.18\gem\006 MORIBUS\ANALISIS y PROYECTOS\varios\modelos_clasificacion.xlsx')
-        else:
-            inmodelo_clasificacion = pd.read_excel(
-                r'/Users/j.m./Library/Mobile Documents/com~apple~CloudDocs/GM/MOBU - '
-                r'OPL/varios/modelos_clasificacion.xlsx')
+                '\\192.168.10.18\gem\006 MORIBUS\ANALISIS y PROYECTOS\varios\modelos_clasificacion.xlsx')
+        else:  # macOS or others
+            hostname = socket.gethostname()
+            if 'Josemarias-Mac-Studio.local' in hostname:  # For Mac Studio
+                inmodelo_clasificacion = pd.read_excel(
+                    r'/Users/jm/Library/Mobile Documents/com~apple~CloudDocs/GM/MOBU - OPL/varios/modelos_clasificacion.xlsx')
+            elif 'MacBook-Pro.local' in hostname:  # For MacBook Pro
+                inmodelo_clasificacion = pd.read_excel(
+                    r'/Users/j.m./Library/Mobile Documents/com~apple~CloudDocs/GM/MOBU - OPL/varios/modelos_clasificacion.xlsx')
+            else:
+                raise ValueError(f"Unknown hostname: {hostname}. Unable to determine file path.")
 
         # Step:
         time.sleep(1)  # Simulate a task
@@ -2507,13 +2556,22 @@ def inventory_oldest_products(saldo_inventory, supplier_info):
     with Progress() as progress:
         # Add a new task
         task = progress.add_task("[green]Analyzing days on hand: ", total=5)
+
         # Leer los datos especificando los tipos de datos
-        if os.name == 'nt':
+        if os.name == 'nt':  # Windows
+            # Network path for Windows
             inmodelo_clasificacion = pd.read_excel(
-                r'\\192.168.10.18\gem\006 MORIBUS\ANALISIS y PROYECTOS\varios\modelos_clasificacion.xlsx')
-        else:
-            inmodelo_clasificacion = pd.read_excel(
-                r'/Users/j.m./Library/Mobile Documents/com~apple~CloudDocs/GM/MOBU - OPL/varios/modelos_clasificacion.xlsx')
+                '\\192.168.10.18\gem\006 MORIBUS\ANALISIS y PROYECTOS\varios\modelos_clasificacion.xlsx')
+        else:  # macOS or others
+            hostname = socket.gethostname()
+            if 'Josemarias-Mac-Studio.local' in hostname:  # For Mac Studio
+                inmodelo_clasificacion = pd.read_excel(
+                    r'/Users/jm/Library/Mobile Documents/com~apple~CloudDocs/GM/MOBU - OPL/varios/modelos_clasificacion.xlsx')
+            elif 'MacBook-Pro.local' in hostname:  # For MacBook Pro
+                inmodelo_clasificacion = pd.read_excel(
+                    r'/Users/j.m./Library/Mobile Documents/com~apple~CloudDocs/GM/MOBU - OPL/varios/modelos_clasificacion.xlsx')
+            else:
+                raise ValueError(f"Unknown hostname: {hostname}. Unable to determine file path.")
 
         # Step:
         time.sleep(1)  # Simulate a task
