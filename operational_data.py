@@ -215,7 +215,7 @@ def get_base_path():
         if hostname == 'MacBook-Pro.local':  # Replace with your MacBook Pro's hostname
             print("Returning MacBook Pro path")
             return '/Users/j.m./Library/Mobile Documents/com~apple~CloudDocs/GM/MOBU - OPL/tbls22_06_24/'
-        elif hostname == 'Josemarias-Mac-Studio.local':  # Replace with your Mac Studio's hostname
+        elif hostname == 'JM-MS.local':  # Replace with your Mac Studio's hostname
             print("Returning Mac Studio path")
             return '/Users/jm/Library/Mobile Documents/com~apple~CloudDocs/GM/MOBU - OPL/tbls22_06_24/'
         else:
@@ -230,7 +230,7 @@ def get_base_output_path():
         hostname = socket.gethostname()  # Get the hostname of the current machine
         if hostname == 'MacBook-Pro.local':
             obase_path = '/Users/j.m./Downloads'
-        elif hostname == 'Josemarias-Mac-Studio.local':
+        elif hostname == 'JM-MS.local':
             obase_path =  '/Users/jm/Downloads'
             return obase_path
 # Main functions -------------------------------------------------------------------------------------------------------
@@ -1021,7 +1021,7 @@ def insaldo_bode_comp(saldo_inventory):
         inmodelo_clasificacion = pd.read_excel('\\192.168.10.18\gem\006 MORIBUS\ANALISIS y PROYECTOS\varios\modelos_clasificacion.xlsx')
     else:  # macOS or others
         hostname = socket.gethostname()
-        if 'Josemarias-Mac-Studio.local' in hostname:  # For Mac Studio
+        if 'JM-MS.local' in hostname:  # For Mac Studio
             inmodelo_clasificacion = pd.read_excel(r'/Users/jm/Library/Mobile Documents/com~apple~CloudDocs/GM/MOBU - OPL/varios/modelos_clasificacion.xlsx')
         elif 'MacBook-Pro.local' in hostname:  # For MacBook Pro
             inmodelo_clasificacion = pd.read_excel(r'/Users/j.m./Library/Mobile Documents/com~apple~CloudDocs/GM/MOBU - OPL/varios/modelos_clasificacion.xlsx')
@@ -1543,7 +1543,7 @@ def capacity_measured_in_cubic_meters(saldo_inventory, supplier_info):
                 '\\192.168.10.18\gem\006 MORIBUS\ANALISIS y PROYECTOS\varios\modelos_clasificacion.xlsx')
         else:  # macOS or others
             hostname = socket.gethostname()
-            if 'Josemarias-Mac-Studio.local' in hostname:  # For Mac Studio
+            if 'JM-MS.local' in hostname:  # For Mac Studio
                 inmodelo_clasificacion = pd.read_excel(
                     r'/Users/jm/Library/Mobile Documents/com~apple~CloudDocs/GM/MOBU - OPL/varios/modelos_clasificacion.xlsx')
             elif 'MacBook-Pro.local' in hostname:  # For MacBook Pro
@@ -2080,7 +2080,7 @@ def billing_data_reconstruction(saldo_inv_cliente_fact, resumen_mensual_ingresos
 
         else:  # macOS or others
             hostname = socket.gethostname()
-            if 'Josemarias-Mac-Studio.local' in hostname:  # For Mac Studio
+            if 'JM-MS.local' in hostname:  # For Mac Studio
                 unique_modes_df = pd.read_excel(
                     r'/Users/jm/Library/Mobile Documents/com~apple~CloudDocs/GM/MOBU - OPL/assets/'
                     r'inventory_analysis_client/pallet_mode_KC.xlsx')
@@ -2404,7 +2404,7 @@ def inventory_proportions_by_product(saldo_inventory, supplier_info):
                 '\\192.168.10.18\gem\006 MORIBUS\ANALISIS y PROYECTOS\varios\modelos_clasificacion.xlsx')
         else:  # macOS or others
             hostname = socket.gethostname()
-            if 'Josemarias-Mac-Studio.local' in hostname:  # For Mac Studio
+            if 'JM-MS.local' in hostname:  # For Mac Studio
                 inmodelo_clasificacion = pd.read_excel(
                     r'/Users/jm/Library/Mobile Documents/com~apple~CloudDocs/GM/MOBU - OPL/varios/modelos_clasificacion.xlsx')
             elif 'MacBook-Pro.local' in hostname:  # For MacBook Pro
@@ -2564,7 +2564,7 @@ def inventory_oldest_products(saldo_inventory, supplier_info):
                 '\\192.168.10.18\gem\006 MORIBUS\ANALISIS y PROYECTOS\varios\modelos_clasificacion.xlsx')
         else:  # macOS or others
             hostname = socket.gethostname()
-            if 'Josemarias-Mac-Studio.local' in hostname:  # For Mac Studio
+            if 'JM-MS.local' in hostname:  # For Mac Studio
                 inmodelo_clasificacion = pd.read_excel(
                     r'/Users/jm/Library/Mobile Documents/com~apple~CloudDocs/GM/MOBU - OPL/varios/modelos_clasificacion.xlsx')
             elif 'MacBook-Pro.local' in hostname:  # For MacBook Pro
